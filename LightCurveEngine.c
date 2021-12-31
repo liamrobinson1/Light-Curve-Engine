@@ -56,6 +56,7 @@ int main(void)
     viewer_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };          // Camera up vector (rotation towards target)
     viewer_camera.fovy = 4.0f;                                // Camera field-of-view Y
     viewer_camera.projection = CAMERA_ORTHOGRAPHIC;             // Camera mode type
+    // SetCameraMode(viewer_camera, CAMERA_FREE);  // Set an orbital camera mode
 
     // Load plane model from a generated mesh
     Model model = LoadModel("models/bob_tri.obj");
@@ -95,7 +96,6 @@ int main(void)
     RenderTexture2D lightCurveTex = LoadRenderTexture(screenWidth, screenHeight); // Creates a RenderTexture2D for the light curve texture
     RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(1, screenHeight);              // Creates a RenderTexture2D (1x1) for the light curve texture
 
-    SetCameraMode(viewer_camera, CAMERA_FREE);  // Set an orbital camera mode
     SetTargetFPS(600);                       // Attempt to run at 60 fps
 
     // Main animation loop
@@ -104,28 +104,47 @@ int main(void)
       //----------------------------------------------------------------------------------
       // Update
       //----------------------------------------------------------------------------------
-      sun.position = (Vector3) {2.0f*sin(GetTime()), 2.0, 2.0f*cos(GetTime())};
+      sun.position = (Vector3) {2.0f*sin(GetTime()), 1.0, 2.0f*cos(GetTime())};
 
-      viewer_camera.position = (Vector3) {0.0, 2.0, -2.0};
+      viewer_camera.position = (Vector3) {2.0, 2.0, 2.0};
 
       light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
 
-      Vector3 mesh_offset = {0.0, 0.0, 0.0};
-      Vector3 viewer_camera_transform = CalculateCameraTransform(viewer_camera, mesh_offset);
-      Vector3 light_camera_transform = CalculateCameraTransform(light_camera, mesh_offset);
+      Vector3 mesh_offsets[5];
+      mesh_offsets[0] = (Vector3) {0.0, 0.0, 0.0};
+      mesh_offsets[1] = (Vector3) {-1.0, -1.0, 0.0};
+      mesh_offsets[2] = (Vector3) {-1.0, 1.0, 0.0};
+      mesh_offsets[3] = (Vector3) {1.0, 1.0, 0.0};
+
+      Vector3 viewer_camera_transforms[5] = { 0 };
+      Vector3 light_camera_transforms[5] = { 0 };
+      Matrix mvp_lights[5] = { 0 };
+      Matrix mvp_light_biases[5] = { 0 };
+
+      for(int i = 0; i <= 3; i++) {
+        viewer_camera_transforms[i] = CalculateCameraTransform(viewer_camera, mesh_offsets[i]);
+        light_camera_transforms[i] = CalculateCameraTransform(light_camera, mesh_offsets[i]);
+      }
       // UpdateCamera(&viewer_camera);              // Update camera
-              
       // Update light values (actually, only enable/disable them)
       UpdateLightValues(lighting_shader, sun);
 
       float viewerCameraPos[3] = { viewer_camera.position.x, viewer_camera.position.y, viewer_camera.position.z };
       float lightPos[3] = { sun.position.x, sun.position.y, sun.position.z };
 
-      Matrix mvp_light = CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offset); //Calculates the model-view-projection matrix for the light_camera
-      Matrix mvp_light_bias = CalculateMVPBFromMVP(mvp_light); //Takes [-1, 1] -> [0, 1] for texture sampling
+      for(int i = 0; i <= 3; i++) {
+        mvp_lights[i] = CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
+        mvp_light_biases[i] = CalculateMVPBFromMVP(mvp_lights[i]); //Takes [-1, 1] -> [0, 1] for texture sampling
+      }
 
-      printf("%.2f, %.2f, %.2f\n", light_camera_transform.x, light_camera_transform.y, light_camera_transform.z);
-      printMatrix(mvp_light);
+      int selectModel = 0;
+
+      Matrix mvp_light = mvp_lights[selectModel];
+      Matrix mvp_light_bias = mvp_light_biases[selectModel];
+      Vector3 light_camera_transform = light_camera_transforms[selectModel];
+      Vector3 viewer_camera_transform = viewer_camera_transforms[selectModel];
+      Vector3 mesh_offset = mesh_offsets[selectModel];
+
       SetShaderValue(lighting_shader, lighting_shader.locs[1], lightPos, SHADER_UNIFORM_VEC3); //Sends the light position vector to the lighting shader
       SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_light_bias);                             //Sends the biased depth texture MVP matrix to the lighting shader
       
@@ -161,6 +180,8 @@ int main(void)
             model.materials[0].shader = lighting_shader;             //Sets the model's shader to the lighting shader (was the depth shader)
             // DrawModel(model, Vector3Zero(), 1.0f, WHITE);           //Renders the model with the full lighting shader
             DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transform.x, viewer_camera_transform.y, viewer_camera_transform.z));     
+
+            DrawSphere(Vector3Add(sun.position, mesh_offset), 0.08f, YELLOW);
         EndMode3D();
       EndTextureMode();
 
@@ -232,6 +253,8 @@ int main(void)
         ClearBackground(BLACK);
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
         DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+    
+
         DrawFPS(10, 10);
 
         DrawText(TextFormat("Clipping area = %.4f", clippingArea), 10, 40, 12, WHITE);
@@ -353,8 +376,8 @@ Vector3 CalculateCameraTransform(Camera cam, Vector3 offset)
   Vector3 basis1 = cam.up;
   Vector3 normal = Vector3Scale(cam.position, 1.0 / Vector3Length(cam.position));
   Vector3 basis2 = Vector3CrossProduct(basis1, normal);
-  Matrix try2 = MatrixTranspose((Matrix) {basis1.x, basis1.y, basis1.z, 0.0,
-                  basis2.x, basis2.y, basis2.z, 0.0,
+  Matrix try2 = MatrixTranspose((Matrix) {basis2.x, basis2.y, basis2.z, 0.0,
+                  basis1.x, basis1.y, basis1.z, 0.0,
                   normal.x, normal.y, normal.z, 0.0,
                   0.0, 0.0, 0.0, 1.0});
 

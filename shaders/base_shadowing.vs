@@ -19,19 +19,25 @@ out vec2 fragTexCoord;
 out vec4 fragColor;
 out vec3 fragNormal;
 out vec4 ShadowCoord;
+out vec3 lightPosition;
 
 // NOTE: Add here your custom variables
 uniform mat4 light_mvp;
+uniform vec3 lightPos;
 
 void main()
 {
-    // Send vertex attributes to fragment shader
     mat4 mvp_manual = matProjection * matView * matModel;
-    fragPosition = vec3(matModel*vec4(vertexPosition, 1.0));
+    // Send vertex attributes to fragment shader
+    // fragPosition = vec3(matModel*vec4(vertexPosition, 1.0));
+    fragPosition = vertexPosition;
+
     fragTexCoord = vertexTexCoord;
     fragColor = vertexColor;
     fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));
 
     gl_Position = mvp*vec4(vertexPosition, 1.0);
     ShadowCoord = light_mvp*vec4(vertexPosition, 1.0);
+    // lightPosition = vec3(matModel*vec4(lightPos, 1.0));
+    lightPosition = vec3(mat4(1.0)*vec4(lightPos, 1.0));
 }

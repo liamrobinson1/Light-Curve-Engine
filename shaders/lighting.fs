@@ -6,6 +6,7 @@ in vec2 fragTexCoord;
 in vec4 fragColor;
 in vec3 fragNormal;
 in vec4 ShadowCoord;
+in vec3 lightPosition;
 
 // Input uniform values
 uniform sampler2D texture0;
@@ -37,7 +38,6 @@ struct Light {
 // Input lighting values
 uniform Light lights[MAX_LIGHTS];
 uniform vec3 viewPos;
-uniform vec3 lightPos;
 uniform sampler2D depthTex;
 
 void main()
@@ -92,17 +92,17 @@ void main()
     float y1 = fragPosition.y + normalOffset.y;
     float z1 = fragPosition.z + normalOffset.z;
 
-    float A = lightPos.x; //for the equation of the light's plane as A(x-x0) + B(y-y0) + C(z-z0) = 0
-    float B = lightPos.y;
-    float C = lightPos.z;
+    float A = lightPosition.x; //for the equation of the light's plane as A(x-x0) + B(y-y0) + C(z-z0) = 0
+    float B = lightPosition.y;
+    float C = lightPosition.z;
 
-    float x0 = lightPos.x; //coordinates of a point we know lies in the plane
-    float y0 = lightPos.y;
-    float z0 = lightPos.z;
+    float x0 = lightPosition.x; //coordinates of a point we know lies in the plane
+    float y0 = lightPosition.y;
+    float z0 = lightPosition.z;
 
     float d = -dot(vec3(x1-x0, y1-y0, z1-z0), vec3(A, B, C))/40.0;
 
-    float cosTheta = dot(normalize(lightPos), normalize(fragNormal));
+    float cosTheta = dot(normalize(lightPosition), normalize(fragNormal));
 
     // float bias = 0.001 * tan(acos(cosTheta));
     float bias = 0.002 * tan(acos(cosTheta));
@@ -111,4 +111,7 @@ void main()
     if(textureDepth < d - bias) {
         finalColor = vec4(0.0, 0.0, 0.0, 1.0);
     }
+
+    // finalColor = texture(depthTex, ShadowCoord.xy);
+    // finalColor = vec4(d, d, d, 1.0);
 }
