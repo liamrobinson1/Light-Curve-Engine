@@ -118,5 +118,5 @@ void main()
 
     // finalColor = texture(depthTex, ShadowCoord.xy);
     // finalColor = vec4(d, d, d, 1.0);
-    // finalColor = vec4(ShadowCoord.xy, 0.0, 1.0);
+    // finalColor = vec4(ShadowCoord.xy + vec2(0.2, 0.2), 0.0, 1.0);
 }

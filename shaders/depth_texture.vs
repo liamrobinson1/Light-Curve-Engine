@@ -23,7 +23,7 @@ uniform mat4 light_mvp;
 uniform int model_id;
 uniform vec3 lightPos;
 
-#define MAX_MODELS   16
+#define MAX_MODELS   25
 
 struct MatArr {
     mat4 mat;

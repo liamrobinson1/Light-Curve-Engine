@@ -29,7 +29,8 @@
 #include "include/rlights.h"
 
 #define GLSL_VERSION            330
-#define MAX_INSTANCES           4
+#define MAX_INSTANCES          5 //no work: 2 5 6 10 11 (last 2 left) 12 17 (last 3 left) 18 (last 5 left) 19 (last 7 left) 20 (last 5 left)
+                                  //not rendered count: 2 5 6 10 9 12 14 13 12 20
 
 Image LoadImageFromScreenFixed(void);
 void printMatrix(Matrix m);
@@ -37,10 +38,11 @@ Matrix CalculateMVPFromCamera(Camera light_camera, int screenWidth, int screenHe
 Matrix CalculateMVPBFromMVP(Matrix mvp_light);
 void SaveScreen(char fname[]);
 float CalculateCameraArea(Camera cam, int screenWidth, int screenHeight);
-float CalculateMeshScaleFactor(Mesh mesh);
+float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int screenHeight); //Finds the factor required to scale all vertices down to fit the model in a unit cube
 Mesh ApplyMeshScaleFactor(Mesh mesh, float sf);
-Vector3 CalculateCameraTransform(Camera cam, Vector3 offset);
-void GenerateTranslations(Vector3 *mesh_offsets, int instances);
+Vector3 TransformOffsetToCameraPlane(Camera cam, Vector3 offset);
+void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, int screenHeight);
+void CalculateRightAndTop(Camera cam, int screenWidth, int screenHeight, float *right, float *top);
 
 int main(void)
 {
@@ -64,7 +66,7 @@ int main(void)
     Model model = LoadModel("models/bob_tri.obj");
     Mesh mesh = model.meshes[0];
 
-    float mesh_scale_factor = CalculateMeshScaleFactor(mesh);
+    float mesh_scale_factor = CalculateMeshScaleFactor(mesh, viewer_camera, screenWidth, screenHeight);
     mesh = ApplyMeshScaleFactor(mesh, mesh_scale_factor);
 
     // Loading depth shader
@@ -82,9 +84,8 @@ int main(void)
     int depth_light_mvp_locs[MAX_INSTANCES];
     for (int i = 0; i < MAX_INSTANCES; i++)
     {
-        char matName[32] = "light_mvps[x].mat\0";
-        matName[11] = '0' + i;
-        depth_light_mvp_locs[i] = GetShaderLocation(depthShader, matName);
+      const char *matName = TextFormat("light_mvps[%d].mat\0", i);
+      depth_light_mvp_locs[i] = GetShaderLocation(depthShader, matName);
     }
 
     lighting_shader.locs[0] = GetShaderLocation(lighting_shader, "viewPos");   //Location of the viewer position uniform for the lighting shader
@@ -92,13 +93,13 @@ int main(void)
     lighting_shader.locs[2] = GetShaderLocation(lighting_shader, "depthTex");  //Location of the depth texture uniform for the lighting shader
     lighting_shader.locs[3] = GetShaderLocation(lighting_shader, "mvp_from_script"); //Location of the light MVP matrix uniform for the lighting shader
     lighting_shader.locs[4] = GetShaderLocation(lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
+    lighting_shader.locs[5] = GetShaderLocation(lighting_shader, "light_mvp");
 
     int lighting_light_mvp_locs[MAX_INSTANCES];
     for (int i = 0; i < MAX_INSTANCES; i++)
     {
-        char matName[32] = "light_mvps[x].mat\0";
-        matName[11] = '0' + i;
-        lighting_light_mvp_locs[i] = GetShaderLocation(lighting_shader, matName);
+      const char *matName = TextFormat("light_mvps[%d].mat\0", i);
+      lighting_light_mvp_locs[i] = GetShaderLocation(lighting_shader, matName);
     }
 
     Light sun = CreateLight(LIGHT_POINT, (Vector3) { 2.0f, 2.0f, 2.0f }, Vector3Zero(), WHITE, lighting_shader);
@@ -126,16 +127,13 @@ int main(void)
       //----------------------------------------------------------------------------------
       sun.position = (Vector3) {2.0f*sin(GetTime()), 1.0, 2.0f*cos(GetTime())};
 
-      viewer_camera.position = (Vector3) {2.0*cos(GetTime()), 1.0, 2.0*sin(GetTime()/2)};
-      // viewer_camera.position = Vector3Scale(Vector3Normalize(viewer_camera.position), 1.0);
+      viewer_camera.position = (Vector3) {2.0*cos(GetTime()), 10.0, 2.0*sin(GetTime()/2)};
 
       light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
 
       Vector3 mesh_offsets[MAX_INSTANCES] = { 0 };
 
-      GenerateTranslations(mesh_offsets, 4);
-
-      // mesh_offsets[4] = (Vector3) {0.0, 0.0, 0.0};
+      GenerateTranslations(mesh_offsets, viewer_camera, screenWidth, screenHeight);
 
       Vector3 viewer_camera_transforms[MAX_INSTANCES] = { 0 };
       Vector3 light_camera_transforms[MAX_INSTANCES] = { 0 };
@@ -144,8 +142,8 @@ int main(void)
       Matrix mvp_light_biases[MAX_INSTANCES] = { 0 };
 
       for(int i = 0; i < MAX_INSTANCES; i++) {
-        viewer_camera_transforms[i] = CalculateCameraTransform(viewer_camera, mesh_offsets[i]);
-        light_camera_transforms[i] = CalculateCameraTransform(light_camera, mesh_offsets[i]);
+        viewer_camera_transforms[i] = TransformOffsetToCameraPlane(viewer_camera, mesh_offsets[i]);
+        light_camera_transforms[i] = TransformOffsetToCameraPlane(light_camera, mesh_offsets[i]);
       }
       // UpdateCamera(&viewer_camera);              // Update camera
       UpdateLightValues(lighting_shader, sun);
@@ -175,11 +173,13 @@ int main(void)
 
           BeginMode3D(light_camera);                          // Begin 3d mode drawing
               model.materials[0].shader = depthShader;        // Assign depth texture shader to model
-              // DrawModel(model, Vector3Zero(), 1.0f, WHITE);           //Renders the model with the full lighting shader
               for(int i = 0; i < MAX_INSTANCES; i++) {
                 SetShaderValue(depthShader, depthShader.locs[3], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
                 SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
-                DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));     
+                DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));  
+                
+                // printf("%.1f %.1f %.1f\n", light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z);
+                // printMatrix(mvp_lights[i]);
               }
 
           EndMode3D();                                        // End 3d mode drawing, returns to orthographic 2d mode
@@ -196,15 +196,17 @@ int main(void)
         SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader    
 
         for(int i = 0; i < MAX_INSTANCES; i++) {
-        BeginMode3D(viewer_camera);
-              DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
-              SetShaderValue(lighting_shader, lighting_shader.locs[4], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
-              SetShaderValueMatrix(lighting_shader, lighting_light_mvp_locs[i], mvp_light_biases[i]);
-              SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_viewer[i]);
-              SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader 
-              DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[i].x, viewer_camera_transforms[i].y, viewer_camera_transforms[i].z));     
-            // DrawSphere(Vector3Add(sun.position, mesh_offset), 0.08f, YELLOW);
-        EndMode3D();
+          BeginMode3D(viewer_camera);
+                DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
+                SetShaderValue(lighting_shader, lighting_shader.locs[4], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
+                
+                SetShaderValueMatrix(lighting_shader, lighting_shader.locs[5], mvp_light_biases[i]);
+                
+                SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_viewer[i]);
+
+                SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader 
+                DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[i].x, viewer_camera_transforms[i].y, viewer_camera_transforms[i].z));     
+          EndMode3D();
         }
       EndTextureMode();
 
@@ -333,21 +335,12 @@ Matrix CalculateMVPFromCamera(Camera cam, int screenWidth, int screenHeight, Vec
 {
         Matrix matView = MatrixLookAt(cam.position, cam.target, cam.up); //Calculate camera view matrix
 
-        float aspect = (float)screenWidth / (float)screenHeight; //Screen aspect ratio
-        double top = cam.fovy/2.0;
-        double right = top*aspect;
+        float top;
+        float right;
+        CalculateRightAndTop(cam, screenWidth, screenHeight, &right, &top);
         Matrix matProj = MatrixOrtho(-right, right, -top, top, 0.01, 1000.0); // Calculate camera projection matrix
 
         return MatrixMultiply(MatrixMultiply(matView, MatrixTranslate(offset.x, offset.y, offset.z)), matProj); //Computes the light MVP matrix
-}
-
-float CalculateCameraArea(Camera cam, int screenWidth, int screenHeight)
-{
-  float aspect = (float)screenWidth / (float)screenHeight; //Screen aspect ratio
-  double top = cam.fovy/2.0; //Half-height of the clipping plane
-  double right = top*aspect; //Half-width of the clipping plane
-
-  return 4.0*top*right;
 }
 
 Matrix CalculateMVPBFromMVP(Matrix MVP) //Calculates the biased MVP matrix for texture sampling
@@ -360,6 +353,21 @@ Matrix CalculateMVPBFromMVP(Matrix MVP) //Calculates the biased MVP matrix for t
     return MatrixMultiply(MVP, MatrixTranspose(bias_matrix)); //Adds the bias for texture sampling
 }
 
+float CalculateCameraArea(Camera cam, int screenWidth, int screenHeight)
+{
+  float top;
+  float right;
+  CalculateRightAndTop(cam, screenWidth, screenHeight, &right, &top);
+  return 4.0*top*right;
+}
+
+void CalculateRightAndTop(Camera cam, int screenWidth, int screenHeight, float *right, float *top)
+{
+  float aspect = (float)screenWidth / (float)screenHeight; //Screen aspect ratio
+  *top = (float) cam.fovy/2.0; //Half-height of the clipping plane
+  *right = *top*aspect; //Half-width of the clipping plane
+}
+
 void SaveScreen(char fname[]) //Saves the current screen image to a file
 {
     Image screen_image = LoadImageFromScreenFixed();
@@ -368,7 +376,7 @@ void SaveScreen(char fname[]) //Saves the current screen image to a file
     printf("Saved image!\n");
 }
 
-float CalculateMeshScaleFactor(Mesh mesh) //Finds the factor required to scale all vertices down to fit the model in a unit cube
+float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int screenHeight) //Finds the factor required to scale all vertices down to fit the model in a unit cube
 {
   float largest_disp = 0.0;
   for(int i = 0; i < mesh.vertexCount; i++) {
@@ -377,12 +385,16 @@ float CalculateMeshScaleFactor(Mesh mesh) //Finds the factor required to scale a
 
     if(vertex_disp > largest_disp) largest_disp = vertex_disp;
   }
+  int square_below = (int) ceil(sqrt(MAX_INSTANCES));  
+  float top;
+  float right;
+  CalculateRightAndTop(cam, screenWidth, screenHeight, &right, &top);
 
-  return largest_disp;
+  return (largest_disp / top) * square_below;
 }
 
 Mesh ApplyMeshScaleFactor(Mesh mesh, float sf)
-{
+{  
   for(int i = 0; i < mesh.vertexCount; i++) {
     mesh.vertices[i*3] = mesh.vertices[i*3]/sf;
     mesh.vertices[i*3+1] = mesh.vertices[i*3+1]/sf;
@@ -391,7 +403,7 @@ Mesh ApplyMeshScaleFactor(Mesh mesh, float sf)
   return mesh;
 }
 
-Vector3 CalculateCameraTransform(Camera cam, Vector3 offset)
+Vector3 TransformOffsetToCameraPlane(Camera cam, Vector3 offset)
 {
   Vector3 basis1 = cam.up;
   Vector3 normal = Vector3Scale(cam.position, 1.0 / Vector3Length(cam.position));
@@ -401,19 +413,26 @@ Vector3 CalculateCameraTransform(Camera cam, Vector3 offset)
                   normal.x, normal.y, normal.z, 0.0,
                   0.0, 0.0, 0.0, 1.0});
 
-  Vector3 camera_transform = Vector3Transform(offset, camera_basis);
-  return camera_transform;
+  Vector3 transformed_offset = Vector3Transform(offset, camera_basis);
+  return transformed_offset;
 }
 
-void GenerateTranslations(Vector3 *mesh_offsets, int instances) 
+void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, int screenHeight) 
 {
+  float top;
+  float right;
+  CalculateRightAndTop(cam, screenWidth, screenHeight, &right, &top);
+
+  int square_below = (int) ceil(sqrt(MAX_INSTANCES));
+
   int index = 0;
-  for(int i = -1; i < 2; i++) {
-    for(int j = -1; j < 2; j++) {
-      if(i == 0) i++;
-      if(j == 0) j++;
-      mesh_offsets[index] = Vector3Scale((Vector3) {i, j, 0.0}, 1.0);
+  for(int i = 0; i < square_below; i++) {
+    for(int j = 0; j < square_below; j++) {
+      Vector3 absolute_offset = {-right * (square_below - 1.0) + i * (square_below + (4.0 - square_below)), -top * (square_below - 1.0) + j * (square_below + (4.0 - square_below)), 0.0};
+
+      mesh_offsets[index] = Vector3Scale(absolute_offset, 1.0 / (float) square_below);
       index++;
+      if(index == MAX_INSTANCES) break;
     }
   }
 }
