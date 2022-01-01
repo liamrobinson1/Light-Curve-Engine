@@ -23,6 +23,7 @@
 #include "rlgl.h"           // OpenGL abstraction layer to OpenGL 1.1, 2.1, 3.3+ or ES2
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define RLIGHTS_IMPLEMENTATION
 #include "include/rlights.h"
@@ -59,7 +60,7 @@ int main(void)
     // SetCameraMode(viewer_camera, CAMERA_FREE);  // Set an orbital camera mode
 
     // Load plane model from a generated mesh
-    Model model = LoadModel("models/bob_tri.obj");
+    Model model = LoadModel("models/10477_Satellite_v1_L3.obj");
     Mesh mesh = model.meshes[0];
 
     float mesh_scale_factor = CalculateMeshScaleFactor(mesh);
@@ -75,11 +76,29 @@ int main(void)
     depthShader.locs[0] = GetShaderLocation(depthShader, "viewPos");           //Location of the viewer position uniform for the depth shader
     depthShader.locs[1] = GetShaderLocation(depthShader, "light_mvp");         //Location of the light MVP matrix uniform for the depth shader
     depthShader.locs[2] = GetShaderLocation(depthShader, "lightPos");          //Location of the light position uniform for the depth shader
+    depthShader.locs[3] = GetShaderLocation(depthShader, "model_id");          //Location of the model id uniform for the depth shader
+
+    int depth_light_mvp_locs[4];
+    for (int i = 0; i <= 3; i++)
+    {
+        char matName[32] = "light_mvps[x].mat\0";
+        matName[11] = '0' + i;
+        depth_light_mvp_locs[i] = GetShaderLocation(depthShader, matName);
+    }
 
     lighting_shader.locs[0] = GetShaderLocation(lighting_shader, "viewPos");   //Location of the viewer position uniform for the lighting shader
     lighting_shader.locs[1] = GetShaderLocation(lighting_shader, "lightPos");  //Location of the light position uniform for the lighting shader
     lighting_shader.locs[2] = GetShaderLocation(lighting_shader, "depthTex");  //Location of the depth texture uniform for the lighting shader
     lighting_shader.locs[3] = GetShaderLocation(lighting_shader, "light_mvp"); //Location of the light MVP matrix uniform for the lighting shader
+    lighting_shader.locs[4] = GetShaderLocation(lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
+
+    int lighting_light_mvp_locs[4];
+    for (int i = 0; i <= 3; i++)
+    {
+        char matName[32] = "light_mvps[x].mat\0";
+        matName[11] = '0' + i;
+        lighting_light_mvp_locs[i] = GetShaderLocation(lighting_shader, matName);
+    }
 
     Light sun = CreateLight(LIGHT_POINT, (Vector3) { 2.0f, 2.0f, 2.0f }, Vector3Zero(), WHITE, lighting_shader);
 
@@ -110,8 +129,9 @@ int main(void)
 
       light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
 
+      Matrix *mesh_transformations = RL_MALLOC(4*sizeof(Matrix));
       Vector3 mesh_offsets[5];
-      mesh_offsets[0] = (Vector3) {0.0, 0.0, 0.0};
+      mesh_offsets[0] = (Vector3) {1.0, -1.0, 0.0};
       mesh_offsets[1] = (Vector3) {-1.0, -1.0, 0.0};
       mesh_offsets[2] = (Vector3) {-1.0, 1.0, 0.0};
       mesh_offsets[3] = (Vector3) {1.0, 1.0, 0.0};
@@ -122,6 +142,7 @@ int main(void)
       Matrix mvp_light_biases[5] = { 0 };
 
       for(int i = 0; i <= 3; i++) {
+        mesh_transformations[i] = MatrixTranslate(mesh_offsets[i].x, mesh_offsets[i].y, mesh_offsets[i].z);
         viewer_camera_transforms[i] = CalculateCameraTransform(viewer_camera, mesh_offsets[i]);
         light_camera_transforms[i] = CalculateCameraTransform(light_camera, mesh_offsets[i]);
       }
@@ -137,7 +158,12 @@ int main(void)
         mvp_light_biases[i] = CalculateMVPBFromMVP(mvp_lights[i]); //Takes [-1, 1] -> [0, 1] for texture sampling
       }
 
-      int selectModel = 0;
+      // printMatrix(CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[0]));
+      // printMatrix(CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[1]));
+      // printMatrix(mvp_light_biases[0]);
+      // printMatrix(mvp_light_biases[1]);
+
+      int selectModel = 1;
 
       Matrix mvp_light = mvp_lights[selectModel];
       Matrix mvp_light_bias = mvp_light_biases[selectModel];
@@ -151,7 +177,7 @@ int main(void)
       SetShaderValue(depthShader, depthShader.locs[0], lightPos, SHADER_UNIFORM_VEC3);           //Sends the viewer position vector (lightPos for this camera) to the depth shader
       SetShaderValueMatrix(depthShader, depthShader.locs[1], mvp_light);                                      //Sends the light MVP matrix to the depth shader
       SetShaderValue(depthShader, depthShader.locs[2], lightPos, SHADER_UNIFORM_VEC3);         //Sends the light position vector to the depth shader
-
+      
       rlUpdateVertexBuffer(mesh.vboId[0], mesh.vertices, mesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
       rlUpdateVertexBuffer(mesh.vboId[2], mesh.normals, mesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
 
@@ -164,25 +190,42 @@ int main(void)
           BeginMode3D(light_camera);                          // Begin 3d mode drawing
               model.materials[0].shader = depthShader;        // Assign depth texture shader to model
               // DrawModel(model, Vector3Zero(), 1.0f, WHITE);           //Renders the model with the full lighting shader
-              DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transform.x, light_camera_transform.y, light_camera_transform.z));     
+              for(int i = 0; i <= 3; i++) {
+                SetShaderValue(depthShader, depthShader.locs[3], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
+                SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
+                DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));     
+              }
+              
+              // for(int i = 0; i < 4; i++) {
+              //   SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
+              // }
+
+              // DrawMeshInstanced(mesh, model.materials[0], mesh_transformations, 4);           // Draw multiple mesh instances with material and different transforms
+              // printMatrix((Matrix) mesh_transformations[0]);
           EndMode3D();                                        // End 3d mode drawing, returns to orthographic 2d mode
       EndTextureMode();                                       // End drawing to texture
+
 
       //----------------------------------------------------------------------------------
       // Write to the rendered texture
       //----------------------------------------------------------------------------------
       BeginTextureMode(renderedTex);
+        model.materials[0].shader = lighting_shader;             //Sets the model's shader to the lighting shader (was the depth shader)
         ClearBackground(BLACK);                             // Clear texture background
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
-        SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader
+        SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader    
 
+        for(int i = 0; i <= 3; i++) {
         BeginMode3D(viewer_camera);
-            model.materials[0].shader = lighting_shader;             //Sets the model's shader to the lighting shader (was the depth shader)
-            // DrawModel(model, Vector3Zero(), 1.0f, WHITE);           //Renders the model with the full lighting shader
-            DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transform.x, viewer_camera_transform.y, viewer_camera_transform.z));     
-
-            DrawSphere(Vector3Add(sun.position, mesh_offset), 0.08f, YELLOW);
+            // DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transform.x, viewer_camera_transform.y, viewer_camera_transform.z)); 
+              DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
+              SetShaderValue(lighting_shader, lighting_shader.locs[4], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
+              SetShaderValueMatrix(lighting_shader, lighting_light_mvp_locs[i], mvp_light_biases[i]);
+              SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader 
+              DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[i].x, viewer_camera_transforms[i].y, viewer_camera_transforms[i].z));     
+            // DrawSphere(Vector3Add(sun.position, mesh_offset), 0.08f, YELLOW);
         EndMode3D();
+        }
       EndTextureMode();
 
       BeginTextureMode(brightnessTex);
@@ -192,8 +235,8 @@ int main(void)
         EndShaderMode();
       EndTextureMode();
 
-      int mipmaps;
-      GenTextureMipmaps(&brightnessTex.texture);
+      // int mipmaps;
+      // GenTextureMipmaps(&brightnessTex.texture);
 
       BeginTextureMode(lightCurveTex);
         ClearBackground(BLACK);                             // Clear texture background
@@ -251,7 +294,7 @@ int main(void)
       //DRAWING
       BeginDrawing();
         ClearBackground(BLACK);
-        DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        // DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
         DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
     
 
