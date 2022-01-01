@@ -29,6 +29,7 @@
 #include "include/rlights.h"
 
 #define GLSL_VERSION            330
+#define MAX_INSTANCES           4
 
 Image LoadImageFromScreenFixed(void);
 void printMatrix(Matrix m);
@@ -39,6 +40,7 @@ float CalculateCameraArea(Camera cam, int screenWidth, int screenHeight);
 float CalculateMeshScaleFactor(Mesh mesh);
 Mesh ApplyMeshScaleFactor(Mesh mesh, float sf);
 Vector3 CalculateCameraTransform(Camera cam, Vector3 offset);
+void GenerateTranslations(Vector3 *mesh_offsets, int instances);
 
 int main(void)
 {
@@ -57,10 +59,9 @@ int main(void)
     viewer_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };          // Camera up vector (rotation towards target)
     viewer_camera.fovy = 4.0f;                                // Camera field-of-view Y
     viewer_camera.projection = CAMERA_ORTHOGRAPHIC;             // Camera mode type
-    // SetCameraMode(viewer_camera, CAMERA_FREE);  // Set an orbital camera mode
 
     // Load plane model from a generated mesh
-    Model model = LoadModel("models/10477_Satellite_v1_L3.obj");
+    Model model = LoadModel("models/bob_tri.obj");
     Mesh mesh = model.meshes[0];
 
     float mesh_scale_factor = CalculateMeshScaleFactor(mesh);
@@ -78,8 +79,8 @@ int main(void)
     depthShader.locs[2] = GetShaderLocation(depthShader, "lightPos");          //Location of the light position uniform for the depth shader
     depthShader.locs[3] = GetShaderLocation(depthShader, "model_id");          //Location of the model id uniform for the depth shader
 
-    int depth_light_mvp_locs[4];
-    for (int i = 0; i <= 3; i++)
+    int depth_light_mvp_locs[MAX_INSTANCES];
+    for (int i = 0; i < MAX_INSTANCES; i++)
     {
         char matName[32] = "light_mvps[x].mat\0";
         matName[11] = '0' + i;
@@ -89,11 +90,11 @@ int main(void)
     lighting_shader.locs[0] = GetShaderLocation(lighting_shader, "viewPos");   //Location of the viewer position uniform for the lighting shader
     lighting_shader.locs[1] = GetShaderLocation(lighting_shader, "lightPos");  //Location of the light position uniform for the lighting shader
     lighting_shader.locs[2] = GetShaderLocation(lighting_shader, "depthTex");  //Location of the depth texture uniform for the lighting shader
-    lighting_shader.locs[3] = GetShaderLocation(lighting_shader, "light_mvp"); //Location of the light MVP matrix uniform for the lighting shader
+    lighting_shader.locs[3] = GetShaderLocation(lighting_shader, "mvp_from_script"); //Location of the light MVP matrix uniform for the lighting shader
     lighting_shader.locs[4] = GetShaderLocation(lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
 
-    int lighting_light_mvp_locs[4];
-    for (int i = 0; i <= 3; i++)
+    int lighting_light_mvp_locs[MAX_INSTANCES];
+    for (int i = 0; i < MAX_INSTANCES; i++)
     {
         char matName[32] = "light_mvps[x].mat\0";
         matName[11] = '0' + i;
@@ -125,57 +126,42 @@ int main(void)
       //----------------------------------------------------------------------------------
       sun.position = (Vector3) {2.0f*sin(GetTime()), 1.0, 2.0f*cos(GetTime())};
 
-      viewer_camera.position = (Vector3) {2.0, 2.0, 2.0};
+      viewer_camera.position = (Vector3) {2.0*cos(GetTime()), 1.0, 2.0*sin(GetTime()/2)};
+      // viewer_camera.position = Vector3Scale(Vector3Normalize(viewer_camera.position), 1.0);
 
       light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
 
-      Matrix *mesh_transformations = RL_MALLOC(4*sizeof(Matrix));
-      Vector3 mesh_offsets[5];
-      mesh_offsets[0] = (Vector3) {1.0, -1.0, 0.0};
-      mesh_offsets[1] = (Vector3) {-1.0, -1.0, 0.0};
-      mesh_offsets[2] = (Vector3) {-1.0, 1.0, 0.0};
-      mesh_offsets[3] = (Vector3) {1.0, 1.0, 0.0};
+      Vector3 mesh_offsets[MAX_INSTANCES] = { 0 };
 
-      Vector3 viewer_camera_transforms[5] = { 0 };
-      Vector3 light_camera_transforms[5] = { 0 };
-      Matrix mvp_lights[5] = { 0 };
-      Matrix mvp_light_biases[5] = { 0 };
+      GenerateTranslations(mesh_offsets, 4);
 
-      for(int i = 0; i <= 3; i++) {
-        mesh_transformations[i] = MatrixTranslate(mesh_offsets[i].x, mesh_offsets[i].y, mesh_offsets[i].z);
+      // mesh_offsets[4] = (Vector3) {0.0, 0.0, 0.0};
+
+      Vector3 viewer_camera_transforms[MAX_INSTANCES] = { 0 };
+      Vector3 light_camera_transforms[MAX_INSTANCES] = { 0 };
+      Matrix mvp_lights[MAX_INSTANCES] = { 0 };
+      Matrix mvp_viewer[MAX_INSTANCES] = { 0 };
+      Matrix mvp_light_biases[MAX_INSTANCES] = { 0 };
+
+      for(int i = 0; i < MAX_INSTANCES; i++) {
         viewer_camera_transforms[i] = CalculateCameraTransform(viewer_camera, mesh_offsets[i]);
         light_camera_transforms[i] = CalculateCameraTransform(light_camera, mesh_offsets[i]);
       }
       // UpdateCamera(&viewer_camera);              // Update camera
-      // Update light values (actually, only enable/disable them)
       UpdateLightValues(lighting_shader, sun);
 
       float viewerCameraPos[3] = { viewer_camera.position.x, viewer_camera.position.y, viewer_camera.position.z };
       float lightPos[3] = { sun.position.x, sun.position.y, sun.position.z };
 
-      for(int i = 0; i <= 3; i++) {
+      for(int i = 0; i < MAX_INSTANCES; i++) {
         mvp_lights[i] = CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
+        mvp_viewer[i] = CalculateMVPFromCamera(viewer_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
         mvp_light_biases[i] = CalculateMVPBFromMVP(mvp_lights[i]); //Takes [-1, 1] -> [0, 1] for texture sampling
       }
 
-      // printMatrix(CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[0]));
-      // printMatrix(CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[1]));
-      // printMatrix(mvp_light_biases[0]);
-      // printMatrix(mvp_light_biases[1]);
-
-      int selectModel = 1;
-
-      Matrix mvp_light = mvp_lights[selectModel];
-      Matrix mvp_light_bias = mvp_light_biases[selectModel];
-      Vector3 light_camera_transform = light_camera_transforms[selectModel];
-      Vector3 viewer_camera_transform = viewer_camera_transforms[selectModel];
-      Vector3 mesh_offset = mesh_offsets[selectModel];
-
       SetShaderValue(lighting_shader, lighting_shader.locs[1], lightPos, SHADER_UNIFORM_VEC3); //Sends the light position vector to the lighting shader
-      SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_light_bias);                             //Sends the biased depth texture MVP matrix to the lighting shader
       
       SetShaderValue(depthShader, depthShader.locs[0], lightPos, SHADER_UNIFORM_VEC3);           //Sends the viewer position vector (lightPos for this camera) to the depth shader
-      SetShaderValueMatrix(depthShader, depthShader.locs[1], mvp_light);                                      //Sends the light MVP matrix to the depth shader
       SetShaderValue(depthShader, depthShader.locs[2], lightPos, SHADER_UNIFORM_VEC3);         //Sends the light position vector to the depth shader
       
       rlUpdateVertexBuffer(mesh.vboId[0], mesh.vertices, mesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
@@ -190,18 +176,12 @@ int main(void)
           BeginMode3D(light_camera);                          // Begin 3d mode drawing
               model.materials[0].shader = depthShader;        // Assign depth texture shader to model
               // DrawModel(model, Vector3Zero(), 1.0f, WHITE);           //Renders the model with the full lighting shader
-              for(int i = 0; i <= 3; i++) {
+              for(int i = 0; i < MAX_INSTANCES; i++) {
                 SetShaderValue(depthShader, depthShader.locs[3], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
                 SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
                 DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));     
               }
-              
-              // for(int i = 0; i < 4; i++) {
-              //   SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
-              // }
 
-              // DrawMeshInstanced(mesh, model.materials[0], mesh_transformations, 4);           // Draw multiple mesh instances with material and different transforms
-              // printMatrix((Matrix) mesh_transformations[0]);
           EndMode3D();                                        // End 3d mode drawing, returns to orthographic 2d mode
       EndTextureMode();                                       // End drawing to texture
 
@@ -215,12 +195,12 @@ int main(void)
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
         SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader    
 
-        for(int i = 0; i <= 3; i++) {
+        for(int i = 0; i < MAX_INSTANCES; i++) {
         BeginMode3D(viewer_camera);
-            // DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transform.x, viewer_camera_transform.y, viewer_camera_transform.z)); 
               DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
               SetShaderValue(lighting_shader, lighting_shader.locs[4], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
               SetShaderValueMatrix(lighting_shader, lighting_light_mvp_locs[i], mvp_light_biases[i]);
+              SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_viewer[i]);
               SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader 
               DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[i].x, viewer_camera_transforms[i].y, viewer_camera_transforms[i].z));     
             // DrawSphere(Vector3Add(sun.position, mesh_offset), 0.08f, YELLOW);
@@ -234,9 +214,6 @@ int main(void)
           DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, (float) screenWidth, (float) -screenHeight }, (Vector2){ 0, 0 }, WHITE);
         EndShaderMode();
       EndTextureMode();
-
-      // int mipmaps;
-      // GenTextureMipmaps(&brightnessTex.texture);
 
       BeginTextureMode(lightCurveTex);
         ClearBackground(BLACK);                             // Clear texture background
@@ -294,7 +271,7 @@ int main(void)
       //DRAWING
       BeginDrawing();
         ClearBackground(BLACK);
-        // DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
         DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
     
 
@@ -419,11 +396,24 @@ Vector3 CalculateCameraTransform(Camera cam, Vector3 offset)
   Vector3 basis1 = cam.up;
   Vector3 normal = Vector3Scale(cam.position, 1.0 / Vector3Length(cam.position));
   Vector3 basis2 = Vector3CrossProduct(basis1, normal);
-  Matrix try2 = MatrixTranspose((Matrix) {basis2.x, basis2.y, basis2.z, 0.0,
+  Matrix camera_basis = MatrixTranspose((Matrix) {basis2.x, basis2.y, basis2.z, 0.0,
                   basis1.x, basis1.y, basis1.z, 0.0,
                   normal.x, normal.y, normal.z, 0.0,
                   0.0, 0.0, 0.0, 1.0});
 
-  Vector3 camera_transform = Vector3Transform(offset, try2);
+  Vector3 camera_transform = Vector3Transform(offset, camera_basis);
   return camera_transform;
+}
+
+void GenerateTranslations(Vector3 *mesh_offsets, int instances) 
+{
+  int index = 0;
+  for(int i = -1; i < 2; i++) {
+    for(int j = -1; j < 2; j++) {
+      if(i == 0) i++;
+      if(j == 0) j++;
+      mesh_offsets[index] = Vector3Scale((Vector3) {i, j, 0.0}, 1.0);
+      index++;
+    }
+  }
 }

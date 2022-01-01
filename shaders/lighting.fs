@@ -108,11 +108,14 @@ void main()
     float bias = 0.002 * tan(acos(cosTheta));
     bias = clamp(bias, 0.001, 0.04);
 
-    if((textureDepth < d - bias) && (textureDepth != 0.0) && (finalColor.r > 0)) {
-        finalColor = vec4(1.0, 0.0, 0.0, 1.0);
+    if((textureDepth < d - bias) && (finalColor.r > 0)) {
+        finalColor = vec4(0.7, 0.0, 0.0, 1.0);
     }
 
-    
+    if(finalColor.r == 0) {
+        finalColor = vec4(0.0, 0.5, 0.7, 1.0);
+    }
+
     // finalColor = texture(depthTex, ShadowCoord.xy);
     // finalColor = vec4(d, d, d, 1.0);
     // finalColor = vec4(ShadowCoord.xy, 0.0, 1.0);

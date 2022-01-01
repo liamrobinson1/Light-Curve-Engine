@@ -22,11 +22,11 @@ out vec4 ShadowCoord;
 out vec3 lightPosition;
 
 // NOTE: Add here your custom variables
-uniform mat4 light_mvp;
+uniform mat4 mvp_from_script;
 uniform int model_id;
 uniform vec3 lightPos;
 
-#define MAX_MODELS   4
+#define MAX_MODELS   16
 struct MatArr {
     mat4 mat;
 };
@@ -45,7 +45,7 @@ void main()
     fragColor = vertexColor;
     fragNormal = normalize(vec3(matNormal*vec4(vertexNormal, 1.0)));
 
-    gl_Position = mvp*vec4(vertexPosition, 1.0);
+    gl_Position = mvp_from_script*vec4(vertexPosition, 1.0);
     ShadowCoord = light_mvp_from_arr*vec4(vertexPosition, 1.0);
     // lightPosition = vec3(matModel*vec4(lightPos, 1.0));
     lightPosition = lightPos;
