@@ -29,7 +29,7 @@
 #include "include/rlights.h"
 
 #define GLSL_VERSION            330
-#define MAX_INSTANCES          5 //no work: 2 5 6 10 11 (last 2 left) 12 17 (last 3 left) 18 (last 5 left) 19 (last 7 left) 20 (last 5 left)
+#define MAX_INSTANCES          15 //no work: 2 5 6 10 11 (last 2 left) 12 17 (last 3 left) 18 (last 5 left) 19 (last 7 left) 20 (last 5 left)
                                   //not rendered count: 2 5 6 10 9 12 14 13 12 20
 
 Image LoadImageFromScreenFixed(void);
@@ -63,7 +63,7 @@ int main(void)
     viewer_camera.projection = CAMERA_ORTHOGRAPHIC;             // Camera mode type
 
     // Load plane model from a generated mesh
-    Model model = LoadModel("models/bob_tri.obj");
+    Model model = LoadModel("models/10477_Satellite_v1_L3.obj");
     Mesh mesh = model.meshes[0];
 
     float mesh_scale_factor = CalculateMeshScaleFactor(mesh, viewer_camera, screenWidth, screenHeight);
@@ -95,6 +95,8 @@ int main(void)
     lighting_shader.locs[4] = GetShaderLocation(lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
     lighting_shader.locs[5] = GetShaderLocation(lighting_shader, "light_mvp");
 
+    min_shader.locs[0] = GetShaderLocation(min_shader, "grid_width");
+
     int lighting_light_mvp_locs[MAX_INSTANCES];
     for (int i = 0; i < MAX_INSTANCES; i++)
     {
@@ -115,7 +117,7 @@ int main(void)
     RenderTexture2D renderedTex = LoadRenderTexture(screenWidth, screenHeight);   // Creates a RenderTexture2D for the rendered texture
     RenderTexture2D brightnessTex = LoadRenderTexture(screenWidth, screenHeight); // Creates a RenderTexture2D for the brightness texture
     RenderTexture2D lightCurveTex = LoadRenderTexture(screenWidth, screenHeight); // Creates a RenderTexture2D for the light curve texture
-    RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(1, screenHeight);              // Creates a RenderTexture2D (1x1) for the light curve texture
+    RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(MAX_INSTANCES)), screenHeight);              // Creates a RenderTexture2D (1x1) for the light curve texture
 
     SetTargetFPS(600);                       // Attempt to run at 60 fps
 
@@ -127,7 +129,7 @@ int main(void)
       //----------------------------------------------------------------------------------
       sun.position = (Vector3) {2.0f*sin(GetTime()), 1.0, 2.0f*cos(GetTime())};
 
-      viewer_camera.position = (Vector3) {2.0*cos(GetTime()), 10.0, 2.0*sin(GetTime()/2)};
+      viewer_camera.position = (Vector3) {2.0*cos(GetTime()), 1.0, 2.0*sin(GetTime()/2)};
 
       light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
 
@@ -177,9 +179,6 @@ int main(void)
                 SetShaderValue(depthShader, depthShader.locs[3], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
                 SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
                 DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));  
-                
-                // printf("%.1f %.1f %.1f\n", light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z);
-                // printMatrix(mvp_lights[i]);
               }
 
           EndMode3D();                                        // End 3d mode drawing, returns to orthographic 2d mode
@@ -227,6 +226,8 @@ int main(void)
       BeginTextureMode(minifiedLightCurveTex);
         ClearBackground(BLACK);                             // Clear texture background
         BeginShaderMode(min_shader);
+          int gridWidth = (int) ceil(sqrt(MAX_INSTANCES));
+          SetShaderValue(min_shader, min_shader.locs[0], &gridWidth, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
           DrawTextureRec(brightnessTex.texture, (Rectangle){ 0, 0, (float) screenWidth, (float) -screenHeight }, (Vector2){ 0, 0 }, WHITE);
         EndShaderMode();
       EndTextureMode();
@@ -275,7 +276,7 @@ int main(void)
         ClearBackground(BLACK);
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
         DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
-    
+        DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
 
         DrawFPS(10, 10);
 
