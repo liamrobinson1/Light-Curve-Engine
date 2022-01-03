@@ -1,21 +1,25 @@
 CleanSlate
 
-% [~, ~] = system("./LightCurveEngine");
+data_points = 1000;
+model_file = "bob_tri.obj";
+instances = 25;
 
-t = linspace(0, 2*pi)';
-sun_vector = [sin(t), 0*t, cos(t)];
+t = linspace(0, 2*pi, data_points)';
+sun_vector = [sin(t), 0*t, cos(t)]*2;
 viewer_vector = [cos(t/2), 0*t, sin(t/2)];
-instances = 12;
+
+sun_vector = reshape(rand(3, 1, data_points) * 3, data_points, 3);
+viewer_vector = reshape(rand(3, 1, data_points) * 3, data_points, 3);
 
 f = fopen('light_curve.lcc','w');
 
 header = "Light Curve Command File\n" + ...
          sprintf("\nBegin header\n") + ...
-         sprintf("%-20s %-20s\n", "Model File", "bob_tri.obj") + ...
+         sprintf("%-20s %-20s\n", "Model File", model_file) + ...
          sprintf("%-20s %-20i\n", "Instances", instances) + ...
          sprintf("%-20s %-20s\n", "Format", "SunXYZViewerXYZ") + ...
          sprintf("%-20s %-20s\n", "Reference Frame", "ObjectBody") + ...
-         sprintf("%-20s %-20d\n", "Data Points", length(sun_vector)) + ...
+         sprintf("%-20s %-20d\n", "Data Points", data_points) + ...
          sprintf("End header\n\n");
 
 fprintf(f, header);
@@ -31,3 +35,6 @@ fprintf(f, data);
 
 type 'light_curve.lcc'
 fclose(f);
+
+
+[~, ~] = system("./LightCurveEngine");

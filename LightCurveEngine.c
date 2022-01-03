@@ -25,11 +25,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+//User-defined
+#include "include/read_light_curve_commands.c"
+
 #define RLIGHTS_IMPLEMENTATION
 #include "include/rlights.h"
 
 #define GLSL_VERSION            330
-#define MAX_INSTANCES          15 //no work: 2 5 6 10 11 (last 2 left) 12 17 (last 3 left) 18 (last 5 left) 19 (last 7 left) 20 (last 5 left)
+#define MAX_INSTANCES          25 //no work: 2 5 6 10 11 (last 2 left) 12 17 (last 3 left) 18 (last 5 left) 19 (last 7 left) 20 (last 5 left)
                                   //not rendered count: 2 5 6 10 9 12 14 13 12 20
 
 Image LoadImageFromScreenFixed(void);
@@ -38,11 +41,13 @@ Matrix CalculateMVPFromCamera(Camera light_camera, int screenWidth, int screenHe
 Matrix CalculateMVPBFromMVP(Matrix mvp_light);
 void SaveScreen(char fname[]);
 float CalculateCameraArea(Camera cam, int screenWidth, int screenHeight);
-float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int screenHeight); //Finds the factor required to scale all vertices down to fit the model in a unit cube
+float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int screenHeight, int instances); //Finds the factor required to scale all vertices down to fit the model in a unit cube
 Mesh ApplyMeshScaleFactor(Mesh mesh, float sf);
 Vector3 TransformOffsetToCameraPlane(Camera cam, Vector3 offset);
-void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, int screenHeight);
+void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, int screenHeight, int instances);
 void CalculateRightAndTop(Camera cam, int screenWidth, int screenHeight, float *right, float *top);
+void InitializeViewerCamera(Camera *cam);
+void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *brightness_shader, Shader *light_curve_shader, Shader *min_shader, int depth_light_mvp_locs[], int lighting_light_mvp_locs[], int instances);
 
 int main(void)
 {
@@ -55,18 +60,22 @@ int main(void)
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     InitWindow(screenWidth, screenHeight, "Light Curve Engine"); // A cool name for a cool app
 
-    Camera viewer_camera = { 0 };                              // Define the viewer camera
-    viewer_camera.position = (Vector3){ 2.0f, 0.0f, -6.0f };   // Camera position
-    viewer_camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };      // Camera looking at point
-    viewer_camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };          // Camera up vector (rotation towards target)
-    viewer_camera.fovy = 4.0f;                                // Camera field-of-view Y
-    viewer_camera.projection = CAMERA_ORTHOGRAPHIC;             // Camera mode type
+    char filename[] = "light_curve.lcc"; 
+    Model model; 
+    int instances; 
+    Vector3 sun_vectors[1000];
+    Vector3 viewer_vectors[1000]; 
+    int data_points;
+
+    ReadLightCurveCommandFile(filename, &model, &instances, sun_vectors, viewer_vectors, &data_points);
+
+    Camera viewer_camera;                            // Define the viewer camera
+    InitializeViewerCamera(&viewer_camera);
 
     // Load plane model from a generated mesh
-    Model model = LoadModel("models/10477_Satellite_v1_L3.obj");
     Mesh mesh = model.meshes[0];
 
-    float mesh_scale_factor = CalculateMeshScaleFactor(mesh, viewer_camera, screenWidth, screenHeight);
+    float mesh_scale_factor = CalculateMeshScaleFactor(mesh, viewer_camera, screenWidth, screenHeight, instances);
     mesh = ApplyMeshScaleFactor(mesh, mesh_scale_factor);
 
     // Loading depth shader
@@ -75,34 +84,10 @@ int main(void)
     Shader brightness_shader = LoadShader("shaders/brightness.vs", "shaders/brightness.fs");
     Shader light_curve_shader = LoadShader("shaders/light_curve_extraction.vs", "shaders/light_curve_extraction.fs");
     Shader min_shader = LoadShader("shaders/minimize.vs", "shaders/minimize.fs");
-    
-    depthShader.locs[0] = GetShaderLocation(depthShader, "viewPos");           //Location of the viewer position uniform for the depth shader
-    depthShader.locs[1] = GetShaderLocation(depthShader, "light_mvp");         //Location of the light MVP matrix uniform for the depth shader
-    depthShader.locs[2] = GetShaderLocation(depthShader, "lightPos");          //Location of the light position uniform for the depth shader
-    depthShader.locs[3] = GetShaderLocation(depthShader, "model_id");          //Location of the model id uniform for the depth shader
 
     int depth_light_mvp_locs[MAX_INSTANCES];
-    for (int i = 0; i < MAX_INSTANCES; i++)
-    {
-      const char *matName = TextFormat("light_mvps[%d].mat\0", i);
-      depth_light_mvp_locs[i] = GetShaderLocation(depthShader, matName);
-    }
-
-    lighting_shader.locs[0] = GetShaderLocation(lighting_shader, "viewPos");   //Location of the viewer position uniform for the lighting shader
-    lighting_shader.locs[1] = GetShaderLocation(lighting_shader, "lightPos");  //Location of the light position uniform for the lighting shader
-    lighting_shader.locs[2] = GetShaderLocation(lighting_shader, "depthTex");  //Location of the depth texture uniform for the lighting shader
-    lighting_shader.locs[3] = GetShaderLocation(lighting_shader, "mvp_from_script"); //Location of the light MVP matrix uniform for the lighting shader
-    lighting_shader.locs[4] = GetShaderLocation(lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
-    lighting_shader.locs[5] = GetShaderLocation(lighting_shader, "light_mvp");
-
-    min_shader.locs[0] = GetShaderLocation(min_shader, "grid_width");
-
     int lighting_light_mvp_locs[MAX_INSTANCES];
-    for (int i = 0; i < MAX_INSTANCES; i++)
-    {
-      const char *matName = TextFormat("light_mvps[%d].mat\0", i);
-      lighting_light_mvp_locs[i] = GetShaderLocation(lighting_shader, matName);
-    }
+    GetLCShaderLocations(&depthShader, &lighting_shader, &brightness_shader, &light_curve_shader, &min_shader, depth_light_mvp_locs, lighting_light_mvp_locs, instances);
 
     Light sun = CreateLight(LIGHT_POINT, (Vector3) { 2.0f, 2.0f, 2.0f }, Vector3Zero(), WHITE, lighting_shader);
 
@@ -117,25 +102,25 @@ int main(void)
     RenderTexture2D renderedTex = LoadRenderTexture(screenWidth, screenHeight);   // Creates a RenderTexture2D for the rendered texture
     RenderTexture2D brightnessTex = LoadRenderTexture(screenWidth, screenHeight); // Creates a RenderTexture2D for the brightness texture
     RenderTexture2D lightCurveTex = LoadRenderTexture(screenWidth, screenHeight); // Creates a RenderTexture2D for the light curve texture
-    RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(MAX_INSTANCES)), screenHeight);              // Creates a RenderTexture2D (1x1) for the light curve texture
+    RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(instances)), screenHeight);              // Creates a RenderTexture2D (1x1) for the light curve texture
 
-    SetTargetFPS(600);                       // Attempt to run at 60 fps
+    SetTargetFPS(5);                       // Attempt to run at 60 fps
 
+    int frame_number = 0;
     // Main animation loop
     while (!WindowShouldClose())            // Detect window close button or ESC key
     {
       //----------------------------------------------------------------------------------
       // Update
       //----------------------------------------------------------------------------------
-      sun.position = (Vector3) {2.0f*sin(GetTime()), 1.0, 2.0f*cos(GetTime())};
-
-      viewer_camera.position = (Vector3) {2.0*cos(GetTime()), 1.0, 2.0*sin(GetTime()/2)};
-
+      sun.position = sun_vectors[frame_number % data_points];
       light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
+      UpdateLightValues(lighting_shader, sun);
+      UpdateLightValues(depthShader, sun);
+      viewer_camera.position = viewer_vectors[frame_number % data_points];
 
       Vector3 mesh_offsets[MAX_INSTANCES] = { 0 };
-
-      GenerateTranslations(mesh_offsets, viewer_camera, screenWidth, screenHeight);
+      GenerateTranslations(mesh_offsets, viewer_camera, screenWidth, screenHeight, instances);
 
       Vector3 viewer_camera_transforms[MAX_INSTANCES] = { 0 };
       Vector3 light_camera_transforms[MAX_INSTANCES] = { 0 };
@@ -143,26 +128,21 @@ int main(void)
       Matrix mvp_viewer[MAX_INSTANCES] = { 0 };
       Matrix mvp_light_biases[MAX_INSTANCES] = { 0 };
 
-      for(int i = 0; i < MAX_INSTANCES; i++) {
+      for(int i = 0; i < instances; i++) {
         viewer_camera_transforms[i] = TransformOffsetToCameraPlane(viewer_camera, mesh_offsets[i]);
         light_camera_transforms[i] = TransformOffsetToCameraPlane(light_camera, mesh_offsets[i]);
       }
-      // UpdateCamera(&viewer_camera);              // Update camera
-      UpdateLightValues(lighting_shader, sun);
 
       float viewerCameraPos[3] = { viewer_camera.position.x, viewer_camera.position.y, viewer_camera.position.z };
       float lightPos[3] = { sun.position.x, sun.position.y, sun.position.z };
 
-      for(int i = 0; i < MAX_INSTANCES; i++) {
+      for(int i = 0; i < instances; i++) {
         mvp_lights[i] = CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
         mvp_viewer[i] = CalculateMVPFromCamera(viewer_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
         mvp_light_biases[i] = CalculateMVPBFromMVP(mvp_lights[i]); //Takes [-1, 1] -> [0, 1] for texture sampling
       }
 
       SetShaderValue(lighting_shader, lighting_shader.locs[1], lightPos, SHADER_UNIFORM_VEC3); //Sends the light position vector to the lighting shader
-      
-      SetShaderValue(depthShader, depthShader.locs[0], lightPos, SHADER_UNIFORM_VEC3);           //Sends the viewer position vector (lightPos for this camera) to the depth shader
-      SetShaderValue(depthShader, depthShader.locs[2], lightPos, SHADER_UNIFORM_VEC3);         //Sends the light position vector to the depth shader
       
       rlUpdateVertexBuffer(mesh.vboId[0], mesh.vertices, mesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
       rlUpdateVertexBuffer(mesh.vboId[2], mesh.normals, mesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
@@ -175,9 +155,14 @@ int main(void)
 
           BeginMode3D(light_camera);                          // Begin 3d mode drawing
               model.materials[0].shader = depthShader;        // Assign depth texture shader to model
-              for(int i = 0; i < MAX_INSTANCES; i++) {
+              for(int i = 0; i < instances; i++) {
                 SetShaderValue(depthShader, depthShader.locs[3], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
                 SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
+                
+                float lightPosFrame[3] = {sun_vectors[i].x, sun_vectors[i].y, sun_vectors[i].z};
+
+                // SetShaderValue(depthShader, depthShader.locs[0], lightPosFrame, SHADER_UNIFORM_VEC3);    //Sends the viewer position vector (lightPos for this camera) to the depth shader
+                SetShaderValue(depthShader, depthShader.locs[2], lightPos, SHADER_UNIFORM_VEC3);         //Sends the light position vector to the depth shader
                 DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));  
               }
 
@@ -194,7 +179,7 @@ int main(void)
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
         SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader    
 
-        for(int i = 0; i < MAX_INSTANCES; i++) {
+        for(int i = 0; i < instances; i++) {
           BeginMode3D(viewer_camera);
                 DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
                 SetShaderValue(lighting_shader, lighting_shader.locs[4], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
@@ -226,7 +211,7 @@ int main(void)
       BeginTextureMode(minifiedLightCurveTex);
         ClearBackground(BLACK);                             // Clear texture background
         BeginShaderMode(min_shader);
-          int gridWidth = (int) ceil(sqrt(MAX_INSTANCES));
+          int gridWidth = (int) ceil(sqrt(instances));
           SetShaderValue(min_shader, min_shader.locs[0], &gridWidth, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
           DrawTextureRec(brightnessTex.texture, (Rectangle){ 0, 0, (float) screenWidth, (float) -screenHeight }, (Vector2){ 0, 0 }, WHITE);
         EndShaderMode();
@@ -275,8 +260,8 @@ int main(void)
       BeginDrawing();
         ClearBackground(BLACK);
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
-        DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
-        DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        // DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        // DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
 
         DrawFPS(10, 10);
 
@@ -285,6 +270,8 @@ int main(void)
         DrawText(TextFormat("Lite Curve function estimate = %.4f", lightCurveFunctionEst), 10, 60, 12, WHITE);
         // DrawText(TextFormat("Light Curve percent difference = %.2f\%", fabs((lightCurveFunctionEst - lightCurveFunction) / lightCurveFunction * 100)), 10, 80, 12, WHITE);
       EndDrawing();
+
+      frame_number++;
     }
 
     //----------------------------------------------------------------------------------
@@ -377,7 +364,7 @@ void SaveScreen(char fname[]) //Saves the current screen image to a file
     printf("Saved image!\n");
 }
 
-float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int screenHeight) //Finds the factor required to scale all vertices down to fit the model in a unit cube
+float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int screenHeight, int instances) //Finds the factor required to scale all vertices down to fit the model in a unit cube
 {
   float largest_disp = 0.0;
   for(int i = 0; i < mesh.vertexCount; i++) {
@@ -386,7 +373,7 @@ float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int screenWidth, int scree
 
     if(vertex_disp > largest_disp) largest_disp = vertex_disp;
   }
-  int square_below = (int) ceil(sqrt(MAX_INSTANCES));  
+  int square_below = (int) ceil(sqrt(instances));  
   float top;
   float right;
   CalculateRightAndTop(cam, screenWidth, screenHeight, &right, &top);
@@ -418,13 +405,13 @@ Vector3 TransformOffsetToCameraPlane(Camera cam, Vector3 offset)
   return transformed_offset;
 }
 
-void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, int screenHeight) 
+void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, int screenHeight, int instances) 
 {
   float top;
   float right;
   CalculateRightAndTop(cam, screenWidth, screenHeight, &right, &top);
 
-  int square_below = (int) ceil(sqrt(MAX_INSTANCES));
+  int square_below = (int) ceil(sqrt(instances));
 
   int index = 0;
   for(int i = 0; i < square_below; i++) {
@@ -433,7 +420,44 @@ void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, in
 
       mesh_offsets[index] = Vector3Scale(absolute_offset, 1.0 / (float) square_below);
       index++;
-      if(index == MAX_INSTANCES) break;
+      if(index == instances) break;
     }
   }
+}
+
+void InitializeViewerCamera(Camera *cam)
+{
+    cam->position = (Vector3){ 2.0f, 0.0f, -6.0f };   // Camera position
+    cam->target = (Vector3){ 0.0f, 0.0f, 0.0f };      // Camera looking at point
+    cam->up = (Vector3){ 0.0f, 1.0f, 0.0f };          // Camera up vector (rotation towards target)
+    cam->fovy = 4.0f;                                // Camera field-of-view Y
+    cam->projection = CAMERA_ORTHOGRAPHIC;             // Camera mode type
+}
+
+void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *brightness_shader, Shader *light_curve_shader, Shader *min_shader, int depth_light_mvp_locs[], int lighting_light_mvp_locs[], int instances) {
+    depthShader->locs[0] = GetShaderLocation(*depthShader, "viewPos");           //Location of the viewer position uniform for the depth shader
+    depthShader->locs[1] = GetShaderLocation(*depthShader, "light_mvp");         //Location of the light MVP matrix uniform for the depth shader
+    depthShader->locs[2] = GetShaderLocation(*depthShader, "lightPos");          //Location of the light position uniform for the depth shader
+    depthShader->locs[3] = GetShaderLocation(*depthShader, "model_id");          //Location of the model id uniform for the depth shader
+
+    for (int i = 0; i < instances; i++)
+    {
+      const char *matName = TextFormat("light_mvps[%d].mat\0", i);
+      depth_light_mvp_locs[i] = GetShaderLocation(*depthShader, matName);
+    }
+
+    lighting_shader->locs[0] = GetShaderLocation(*lighting_shader, "viewPos");   //Location of the viewer position uniform for the lighting shader
+    lighting_shader->locs[1] = GetShaderLocation(*lighting_shader, "lightPos");  //Location of the light position uniform for the lighting shader
+    lighting_shader->locs[2] = GetShaderLocation(*lighting_shader, "depthTex");  //Location of the depth texture uniform for the lighting shader
+    lighting_shader->locs[3] = GetShaderLocation(*lighting_shader, "mvp_from_script"); //Location of the light MVP matrix uniform for the lighting shader
+    lighting_shader->locs[4] = GetShaderLocation(*lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
+    lighting_shader->locs[5] = GetShaderLocation(*lighting_shader, "light_mvp");
+
+    min_shader->locs[0] = GetShaderLocation(*min_shader, "grid_width");
+
+    // for (int i = 0; i < instances; i++)
+    // {
+    //   const char *matName = TextFormat("light_mvps[%d].mat\0", i);
+    //   lighting_light_mvp_locs[i] = GetShaderLocation(*lighting_shader, matName);
+    // }
 }

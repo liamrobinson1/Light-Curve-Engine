@@ -11,6 +11,27 @@ uniform mat4 mvp;
 uniform mat4 matModel;
 uniform mat4 matNormal;
 
+#define     MAX_LIGHTS              4
+#define     LIGHT_DIRECTIONAL       0
+#define     LIGHT_POINT             1
+
+struct MaterialProperty {
+    vec3 color;
+    int useSampler;
+    sampler2D sampler;
+};
+
+struct Light {
+    int enabled;
+    int type;
+    vec3 position;
+    vec3 target;
+    vec4 color;
+};
+
+// Input lighting values
+uniform Light lights[MAX_LIGHTS];
+
 // Output vertex attributes (to fragment shader)
 out vec3 fragPosition;
 out vec2 fragTexCoord;
