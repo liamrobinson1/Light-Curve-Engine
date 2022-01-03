@@ -48,6 +48,8 @@ void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int screenWidth, in
 void CalculateRightAndTop(Camera cam, int screenWidth, int screenHeight, float *right, float *top);
 void InitializeViewerCamera(Camera *cam);
 void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *brightness_shader, Shader *light_curve_shader, Shader *min_shader, int depth_light_mvp_locs[], int lighting_light_mvp_locs[], int instances);
+void CalculateLightCurveValues(float lightCurveFunctionTrue[], float lightCurveFunctionEst[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances);
+void printVector3(Vector3 vec, char name[]);
 
 int main(void)
 {
@@ -68,6 +70,7 @@ int main(void)
     int data_points;
 
     ReadLightCurveCommandFile(filename, &model, &instances, sun_vectors, viewer_vectors, &data_points);
+    int gridWidth = (int) ceil(sqrt(instances));
 
     Camera viewer_camera;                            // Define the viewer camera
     InitializeViewerCamera(&viewer_camera);
@@ -104,7 +107,7 @@ int main(void)
     RenderTexture2D lightCurveTex = LoadRenderTexture(screenWidth, screenHeight); // Creates a RenderTexture2D for the light curve texture
     RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(instances)), screenHeight);              // Creates a RenderTexture2D (1x1) for the light curve texture
 
-    SetTargetFPS(5);                       // Attempt to run at 60 fps
+    SetTargetFPS(1);                       // Attempt to run at 60 fps
 
     int frame_number = 0;
     // Main animation loop
@@ -113,86 +116,92 @@ int main(void)
       //----------------------------------------------------------------------------------
       // Update
       //----------------------------------------------------------------------------------
-      sun.position = sun_vectors[frame_number % data_points];
-      light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
-      UpdateLightValues(lighting_shader, sun);
-      UpdateLightValues(depthShader, sun);
-      viewer_camera.position = viewer_vectors[frame_number % data_points];
-
-      Vector3 mesh_offsets[MAX_INSTANCES] = { 0 };
-      GenerateTranslations(mesh_offsets, viewer_camera, screenWidth, screenHeight, instances);
-
-      Vector3 viewer_camera_transforms[MAX_INSTANCES] = { 0 };
-      Vector3 light_camera_transforms[MAX_INSTANCES] = { 0 };
-      Matrix mvp_lights[MAX_INSTANCES] = { 0 };
-      Matrix mvp_viewer[MAX_INSTANCES] = { 0 };
-      Matrix mvp_light_biases[MAX_INSTANCES] = { 0 };
-
-      for(int i = 0; i < instances; i++) {
-        viewer_camera_transforms[i] = TransformOffsetToCameraPlane(viewer_camera, mesh_offsets[i]);
-        light_camera_transforms[i] = TransformOffsetToCameraPlane(light_camera, mesh_offsets[i]);
-      }
-
-      float viewerCameraPos[3] = { viewer_camera.position.x, viewer_camera.position.y, viewer_camera.position.z };
-      float lightPos[3] = { sun.position.x, sun.position.y, sun.position.z };
-
-      for(int i = 0; i < instances; i++) {
-        mvp_lights[i] = CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
-        mvp_viewer[i] = CalculateMVPFromCamera(viewer_camera, screenWidth, screenHeight, mesh_offsets[i]); //Calculates the model-view-projection matrix for the light_camera
-        mvp_light_biases[i] = CalculateMVPBFromMVP(mvp_lights[i]); //Takes [-1, 1] -> [0, 1] for texture sampling
-      }
-
-      SetShaderValue(lighting_shader, lighting_shader.locs[1], lightPos, SHADER_UNIFORM_VEC3); //Sends the light position vector to the lighting shader
-      
-      rlUpdateVertexBuffer(mesh.vboId[0], mesh.vertices, mesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
-      rlUpdateVertexBuffer(mesh.vboId[2], mesh.normals, mesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
-
-      //----------------------------------------------------------------------------------
-      // Write to depth texture
-      //----------------------------------------------------------------------------------
       BeginTextureMode(depthTex);                             // Enable drawing to texture
           ClearBackground(BLACK);                             // Clear texture background
+      EndTextureMode();
+      
+      BeginTextureMode(renderedTex);                             // Enable drawing to texture
+          ClearBackground(BLACK);                             // Clear texture background
+      EndTextureMode();
 
-          BeginMode3D(light_camera);                          // Begin 3d mode drawing
-              model.materials[0].shader = depthShader;        // Assign depth texture shader to model
-              for(int i = 0; i < instances; i++) {
-                SetShaderValue(depthShader, depthShader.locs[3], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
-                SetShaderValueMatrix(depthShader, depth_light_mvp_locs[i], mvp_lights[i]);
+      rlUpdateVertexBuffer(mesh.vboId[0], mesh.vertices, mesh.vertexCount*3*sizeof(float), 0);    // Update vertex position
+      rlUpdateVertexBuffer(mesh.vboId[2], mesh.normals, mesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
+      
+      for(int instance = 0; instance < instances; instance++) {
+        // int render_index = instance + frame_number * instances;
+        int render_index = instance;
+
+        sun.position = sun_vectors[render_index % data_points];
+        viewer_camera.position = viewer_vectors[render_index % data_points];
+
+        light_camera.position = (Vector3) {sun.position.x, sun.position.y, sun.position.z};
+        UpdateLightValues(lighting_shader, sun);
+        UpdateLightValues(depthShader, sun);
+
+        Vector3 mesh_offsets[MAX_INSTANCES] = { 0 };
+        GenerateTranslations(mesh_offsets, viewer_camera, screenWidth, screenHeight, instances);
+
+        Vector3 viewer_camera_transforms[MAX_INSTANCES] = { 0 };
+        Vector3 light_camera_transforms[MAX_INSTANCES] = { 0 };
+        Matrix mvp_lights[MAX_INSTANCES] = { 0 };
+        Matrix mvp_viewer[MAX_INSTANCES] = { 0 };
+        Matrix mvp_light_biases[MAX_INSTANCES] = { 0 };
+
+        viewer_camera_transforms[instance] = TransformOffsetToCameraPlane(viewer_camera, mesh_offsets[instance]);
+        light_camera_transforms[instance] = TransformOffsetToCameraPlane(light_camera, mesh_offsets[instance]);
+
+        float viewerCameraPos[3] = { viewer_camera.position.x, viewer_camera.position.y, viewer_camera.position.z };
+        float lightPos[3] = { sun.position.x, sun.position.y, sun.position.z };
+
+        mvp_lights[instance] = CalculateMVPFromCamera(light_camera, screenWidth, screenHeight, mesh_offsets[instance]); //Calculates the model-view-projection matrix for the light_camera
+        mvp_viewer[instance] = CalculateMVPFromCamera(viewer_camera, screenWidth, screenHeight, mesh_offsets[instance]); //Calculates the model-view-projection matrix for the light_camera
+        mvp_light_biases[instance] = CalculateMVPBFromMVP(mvp_lights[instance]); //Takes [-1, 1] -> [0, 1] for texture sampling
+
+        SetShaderValue(lighting_shader, lighting_shader.locs[1], lightPos, SHADER_UNIFORM_VEC3); //Sends the light position vector to the lighting shader
+
+        //----------------------------------------------------------------------------------
+        // Write to depth texture
+        //----------------------------------------------------------------------------------
+        BeginTextureMode(depthTex);                             // Enable drawing to texture
+
+            BeginMode3D(light_camera);                          // Begin 3d mode drawing
+                model.materials[0].shader = depthShader;        // Assign depth texture shader to model
+
+                SetShaderValue(depthShader, depthShader.locs[3], &instance, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
+                SetShaderValueMatrix(depthShader, depth_light_mvp_locs[instance], mvp_lights[instance]);
                 
-                float lightPosFrame[3] = {sun_vectors[i].x, sun_vectors[i].y, sun_vectors[i].z};
-
-                // SetShaderValue(depthShader, depthShader.locs[0], lightPosFrame, SHADER_UNIFORM_VEC3);    //Sends the viewer position vector (lightPos for this camera) to the depth shader
                 SetShaderValue(depthShader, depthShader.locs[2], lightPos, SHADER_UNIFORM_VEC3);         //Sends the light position vector to the depth shader
-                DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[i].x, light_camera_transforms[i].y, light_camera_transforms[i].z));  
-              }
+                DrawMesh(mesh, model.materials[0], MatrixTranslate(light_camera_transforms[instance].x, light_camera_transforms[instance].y, light_camera_transforms[instance].z));  
 
-          EndMode3D();                                        // End 3d mode drawing, returns to orthographic 2d mode
-      EndTextureMode();                                       // End drawing to texture
+            EndMode3D();                                        // End 3d mode drawing, returns to orthographic 2d mode
+        EndTextureMode();                                       // End drawing to texture
 
+        //----------------------------------------------------------------------------------
+        // Write to the rendered texture
+        //----------------------------------------------------------------------------------
+        BeginTextureMode(renderedTex);
+          model.materials[0].shader = lighting_shader;             //Sets the model's shader to the lighting shader (was the depth shader)
 
-      //----------------------------------------------------------------------------------
-      // Write to the rendered texture
-      //----------------------------------------------------------------------------------
-      BeginTextureMode(renderedTex);
-        model.materials[0].shader = lighting_shader;             //Sets the model's shader to the lighting shader (was the depth shader)
-        ClearBackground(BLACK);                             // Clear texture background
-        DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
-        SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader    
+          DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
+          
+          SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader    
 
-        for(int i = 0; i < instances; i++) {
           BeginMode3D(viewer_camera);
                 DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, 0, 0}, (Vector2){ 0, 0 }, WHITE);
-                SetShaderValue(lighting_shader, lighting_shader.locs[4], &i, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
                 
-                SetShaderValueMatrix(lighting_shader, lighting_shader.locs[5], mvp_light_biases[i]);
-                
-                SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_viewer[i]);
-
+                SetShaderValue(lighting_shader, lighting_shader.locs[4], &instance, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
+                SetShaderValueMatrix(lighting_shader, lighting_shader.locs[5], mvp_light_biases[instance]);
+                SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_viewer[instance]);
                 SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader 
-                DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[i].x, viewer_camera_transforms[i].y, viewer_camera_transforms[i].z));     
+                
+                DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[instance].x, viewer_camera_transforms[instance].y, viewer_camera_transforms[instance].z));     
+
+                printVector3(light_camera_transforms[instance], "Viewer camera transform");
           EndMode3D();
-        }
-      EndTextureMode();
+
+        EndTextureMode();
+
+      }
 
       BeginTextureMode(brightnessTex);
         ClearBackground(BLACK);                             // Clear texture background
@@ -211,64 +220,30 @@ int main(void)
       BeginTextureMode(minifiedLightCurveTex);
         ClearBackground(BLACK);                             // Clear texture background
         BeginShaderMode(min_shader);
-          int gridWidth = (int) ceil(sqrt(instances));
           SetShaderValue(min_shader, min_shader.locs[0], &gridWidth, SHADER_UNIFORM_INT); //Sends the light position vector to the lighting shader
           DrawTextureRec(brightnessTex.texture, (Rectangle){ 0, 0, (float) screenWidth, (float) -screenHeight }, (Vector2){ 0, 0 }, WHITE);
         EndShaderMode();
       EndTextureMode();
 
-      Image light_curve_image = LoadImageFromTexture(minifiedLightCurveTex.texture);
-      int total_pixels = brightnessTex.texture.width * brightnessTex.texture.height;
+      float clipping_area = CalculateCameraArea(viewer_camera, screenWidth, screenHeight);
 
-      // Image full_light_curve_image = LoadImageFromTexture(brightnessTex.texture); 
-
-      // float lit_pixels = 0.0;
-      // float sum_total_irrad = 0.0;
-
-      // for(int i = 0; i < full_light_curve_image.width; i++) {
-      //   for(int j = 0; j < full_light_curve_image.height; j++) {
-      //     Color pix_color = GetImageColor(full_light_curve_image, i, j);
-
-      //     if((float) pix_color.g > 0.0) {
-      //       lit_pixels += 1.0;
-      //     }
-      //     sum_total_irrad += pix_color.r / 255.0;
-      //   }
-      // }
-
-      float lit_rows = 0.0;
-      float sum_total_irrad_est = 0.0;
-
-      for(int i = 0; i < light_curve_image.height; i++) {
-        Color pix_color = GetImageColor(light_curve_image, 0, i);
-        
-        if((float) pix_color.g > 0.0) { //for all lit rows
-          lit_rows += 1.0;
-          sum_total_irrad_est += (float) pix_color.r / 255.0 * brightnessTex.texture.width; //Represents the average irrad of each row * the fraction of lit pixels on that row
-        }
-      }
-    
-      float clippingArea = CalculateCameraArea(viewer_camera, screenWidth, screenHeight);
-
-      UnloadImage(light_curve_image);
-      // UnloadImage(full_light_curve_image);
-
-      // float lightCurveFunction = sum_total_irrad / total_pixels * clippingArea; //running_average.x = (for all lit pixels, average irrad)
-      float lightCurveFunctionEst = sum_total_irrad_est / total_pixels * clippingArea;
+      float lightCurveFunctionTrue[MAX_INSTANCES];
+      float lightCurveFunctionEst[MAX_INSTANCES];
+      CalculateLightCurveValues(lightCurveFunctionTrue, lightCurveFunctionEst, minifiedLightCurveTex, brightnessTex, clipping_area, instances);
 
       //DRAWING
       BeginDrawing();
         ClearBackground(BLACK);
         DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
-        // DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
-        // DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
 
         DrawFPS(10, 10);
 
-        DrawText(TextFormat("Clipping area = %.4f", clippingArea), 10, 40, 12, WHITE);
-        // DrawText(TextFormat("Light Curve function = %.4f", lightCurveFunction), 10, 40, 12, WHITE);
-        DrawText(TextFormat("Lite Curve function estimate = %.4f", lightCurveFunctionEst), 10, 60, 12, WHITE);
-        // DrawText(TextFormat("Light Curve percent difference = %.2f\%", fabs((lightCurveFunctionEst - lightCurveFunction) / lightCurveFunction * 100)), 10, 80, 12, WHITE);
+        DrawText(TextFormat("Clipping area = %.4f", clipping_area), 10, 40, 12, WHITE);
+        // for(int i = 0; i < instances; i++) {
+        //   DrawText(TextFormat("Light Curve function estimate instance %d = %.4f (dev %.4f real)", i, lightCurveFunctionEst[i], (lightCurveFunctionEst[i] - lightCurveFunctionTrue[i])), 10, 60 + 20*i, 12, WHITE);
+        // }
       EndDrawing();
 
       frame_number++;
@@ -460,4 +435,84 @@ void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *
     //   const char *matName = TextFormat("light_mvps[%d].mat\0", i);
     //   lighting_light_mvp_locs[i] = GetShaderLocation(*lighting_shader, matName);
     // }
+}
+
+void CalculateLightCurveValues(float lightCurveFunctionTrue[], float lightCurveFunctionEst[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances) {
+    int gridWidth = (int) ceil(sqrt(instances));
+
+    Image light_curve_image = LoadImageFromTexture(minifiedLightCurveTex.texture);
+    int total_pixels = brightnessTex.texture.width * brightnessTex.texture.height;
+
+    Image full_light_curve_image = LoadImageFromTexture(brightnessTex.texture); 
+
+    float instance_total_irrad_est[MAX_INSTANCES];
+    float instance_total_irrad_true[MAX_INSTANCES];
+
+    int grid_pixel_height = light_curve_image.height / gridWidth;
+
+    //CALCULATING TRUE LC VALUES
+    int instance = 0;
+    for(int col_instance = 0; col_instance < gridWidth; col_instance++) {
+      for(int row_instance = 0; row_instance < gridWidth; row_instance++) {
+
+        float lit_rows = 0.0;
+        float sum_total_irrad_true = 0.0;
+
+        for(int row_instance_pixel = row_instance * grid_pixel_height; row_instance_pixel < (row_instance + 1) * grid_pixel_height; row_instance_pixel++) {
+          for(int col_instance_pixel = col_instance * grid_pixel_height; col_instance_pixel < (col_instance + 1) * grid_pixel_height; col_instance_pixel++) {
+            
+            Color pix_color = GetImageColor(full_light_curve_image, col_instance_pixel, row_instance_pixel);
+            
+            if((float) pix_color.g > 0.0) { //for all lit rows
+              lit_rows += 1.0;
+              sum_total_irrad_true += (float) pix_color.r / 255.0; //Represents the average irrad of each row * the fraction of lit pixels on that row
+            }
+          }
+        }
+        instance_total_irrad_true[instance++] = sum_total_irrad_true;
+      }
+    }
+    
+    // for(int i = 0; i < full_light_curve_image.width; i++) {
+    //   for(int j = 0; j < full_light_curve_image.height; j++) {
+    //     Color pix_color = GetImageColor(full_light_curve_image, i, j);
+
+    //     if((float) pix_color.g > 0.0) {
+    //       lit_pixels += 1.0;
+    //     }
+    //     sum_total_irrad += pix_color.r / 255.0;
+    //   }
+    // }
+    
+    //CALCULATING SHADED LC VALUES
+    for(int col = 0; col < light_curve_image.width; col++) {
+      for(int row_instance = 0; row_instance < gridWidth; row_instance++) {
+        float lit_rows = 0.0;
+        float sum_total_irrad_est = 0.0;
+        for(int row_instance_pixel = row_instance * grid_pixel_height; row_instance_pixel < (row_instance + 1) * grid_pixel_height; row_instance_pixel++) {
+          Color pix_color = GetImageColor(light_curve_image, col, row_instance_pixel);
+          
+          if((float) pix_color.g > 0.0) { //for all lit rows
+            lit_rows += 1.0;
+            sum_total_irrad_est += (float) pix_color.r / 255.0 * grid_pixel_height; //Represents the average irrad of each row * the fraction of lit pixels on that row
+          }
+        }
+        instance_total_irrad_est[row_instance + gridWidth * col] = sum_total_irrad_est;
+      }
+    }
+  
+    UnloadImage(light_curve_image);
+    UnloadImage(full_light_curve_image);
+    
+    for(int i = 0; i < instances; i++) {
+      lightCurveFunctionTrue[i] = instance_total_irrad_true[i] / total_pixels * clipping_area; //running_average.x = (for all lit pixels, average irrad)
+    }
+    for(int i = 0; i < instances; i++) {
+      lightCurveFunctionEst[i] = instance_total_irrad_est[i] / total_pixels * clipping_area;
+    }
+}
+
+void printVector3(Vector3 vec, char name[])
+{
+  printf("%s: %.4f, %.4f, %.4f\n", name, vec.x, vec.y, vec.z);
 }
