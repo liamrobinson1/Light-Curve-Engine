@@ -92,7 +92,7 @@ int main(void)
     int lighting_light_mvp_locs[MAX_INSTANCES];
     GetLCShaderLocations(&depthShader, &lighting_shader, &brightness_shader, &light_curve_shader, &min_shader, depth_light_mvp_locs, lighting_light_mvp_locs, instances);
 
-    Light sun = CreateLight(LIGHT_POINT, (Vector3) { 2.0f, 2.0f, 2.0f }, Vector3Zero(), WHITE, lighting_shader);
+    Light sun = CreateLight(LIGHT_DIRECTIONAL, (Vector3) { 2.0f, 2.0f, 2.0f }, Vector3Zero(), WHITE, lighting_shader);
 
     Camera light_camera = { 0 };                        // The camera that views the scene from the light's perspective
     light_camera.position = sun.position;         // Camera position
@@ -196,7 +196,7 @@ int main(void)
                 
                 DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[instance].x, viewer_camera_transforms[instance].y, viewer_camera_transforms[instance].z));     
 
-                printVector3(light_camera_transforms[instance], "Viewer camera transform");
+                printVector3(sun.position, "Sun position");
           EndMode3D();
 
         EndTextureMode();

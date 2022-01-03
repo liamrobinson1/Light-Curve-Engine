@@ -4,14 +4,15 @@ rng default
 
 data_points = 1000;
 model_file = "bob_tri.obj";
-instances = 1;
+instances = 5;
 
 t = linspace(0, 2*pi, data_points)';
 sun_vector = [sin(t/10), 0*t, cos(t/10)]*2;
 viewer_vector = sun_vector;
 
-% sun_vector = reshape(rand(3, 1, data_points) * 3 - 2, data_points, 3);
-% viewer_vector = reshape(rand(3, 1, data_points) * 3, data_points, 3);
+sun_vector = 2*randUnitVectors(data_points);
+
+viewer_vector = 2*randUnitVectors(data_points);
 
 f = fopen('light_curve.lcc','w');
 
@@ -40,3 +41,8 @@ fclose(f);
 
 
 [~, ~] = system("./LightCurveEngine");
+
+function unit_vectors = randUnitVectors(data_points)
+    unit_vectors = reshape((rand(3, 1, data_points) - 0.5) * 2, data_points, 3);
+    unit_vectors = unit_vectors ./ vecnorm(unit_vectors, 2, 2);
+end

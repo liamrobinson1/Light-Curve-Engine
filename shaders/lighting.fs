@@ -42,6 +42,8 @@ uniform sampler2D depthTex;
 
 void main()
 {
+    // vec3 lightPos = vec3(0.0, 0.0, 10.);
+
     // Texel color fetching from texture sampler
     vec3 lightDot = vec3(0.0);
     vec3 normal = normalize(fragNormal);
