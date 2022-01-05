@@ -3,25 +3,24 @@ rng default
 
 data_points = 1000;
 
-sun_vectors = 2*randUnitVectors(data_points);
-viewer_vectors = 2*randUnitVectors(data_points);
 model_file = "bs_smile.obj";
 command_file = "light_curve.lcc";
 results_file = "light_curve.lcr";
 computation_method = "GPU";
 dimensions = 15*60; %dimensions should be a multiple of 60
-frame_rate = 1;
+frame_rate = 1000;
 
 t = linspace(0, 2 * pi, data_points)';
+
 sun_vectors = [0*t + 0.5, 0*t + 2, 1 + 0*t];
 viewer_vectors = [sin(t) + 0*t, 0 + 0*t, cos(t) + 0*t];
 
 viewer_vectors = viewer_vectors ./ vecnorm(viewer_vectors, 2, 2) * 2;
 sun_vectors = sun_vectors ./ vecnorm(sun_vectors, 2, 2) * 2;
+
 figure
 hold on
 
-index = 0;
 for instances = [1]
     writeLCRFile(command_file, results_file, model_file, instances, dimensions, data_points, computation_method, ...
     sun_vectors, viewer_vectors, frame_rate)
