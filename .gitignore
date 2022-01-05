@@ -42,6 +42,9 @@
 *.idb
 *.pdb
 
+# Autosave files
+*.asv
+
 # Kernel Module Compile Results
 *.mod*
 *.cmd

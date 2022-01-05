@@ -5,38 +5,34 @@ data_points = 1000;
 
 sun_vectors = 2*randUnitVectors(data_points);
 viewer_vectors = 2*randUnitVectors(data_points);
-model_file = "bob_tri.obj";
+model_file = "bs_smile.obj";
 command_file = "light_curve.lcc";
 results_file = "light_curve.lcr";
 computation_method = "GPU";
-dimensions = 2*60; %dimensions should be a multiple of 60
+dimensions = 15*60; %dimensions should be a multiple of 60
+frame_rate = 1;
 
-t = linspace(0, 2*pi, data_points)';
-sun_vectors = [sin(t/10), 0*t, cos(t)]*2;
-viewer_vectors = [0*t, sin(t/2), cos(t/10)]*2;
+t = linspace(0, 2 * pi, data_points)';
+sun_vectors = [0*t + 0.5, 0*t + 2, 1 + 0*t];
+viewer_vectors = [sin(t) + 0*t, 0 + 0*t, cos(t) + 0*t];
 
+viewer_vectors = viewer_vectors ./ vecnorm(viewer_vectors, 2, 2) * 2;
+sun_vectors = sun_vectors ./ vecnorm(sun_vectors, 2, 2) * 2;
 figure
 hold on
 
-dimensions = 10 * 60;
-
 index = 0;
-for instances = 25
-
+for instances = [1]
     writeLCRFile(command_file, results_file, model_file, instances, dimensions, data_points, computation_method, ...
-    sun_vectors, viewer_vectors)
+    sun_vectors, viewer_vectors, frame_rate)
     
     tic;
     [~, ~] = system("./LightCurveEngine");
     toc;
 
     light_curve_data = importdata(results_file);
-    
-    if instances == 1
-        light_curve_1 = light_curve_data;
-    end
 
-    plot(1:data_points, light_curve_data);
+    plot(1:data_points, light_curve_data, 'linewidth', 2);
     drawnow;
 end
 
@@ -47,8 +43,8 @@ function unit_vectors = randUnitVectors(data_points)
     unit_vectors = unit_vectors ./ vecnorm(unit_vectors, 2, 2);
 end
 
-function writeLCRFile(command_file, results_file, model_file, instances, dimensions, data_points, computation_method, ...
-    sun_vectors, viewer_vectors)
+function writeLCRFile(command_file, results_file, model_file, instances, dimensions, ...
+    data_points, computation_method, sun_vectors, viewer_vectors, frame_rate)
     f = fopen(command_file,'w');
     
     header = "Light Curve Command File\n" + ...
@@ -61,10 +57,17 @@ function writeLCRFile(command_file, results_file, model_file, instances, dimensi
              sprintf("%-20s %-20d\n", "Data Points", data_points) + ...
              sprintf("%-20s %-20s\n", "Computation Method", computation_method) + ...
              sprintf("%-20s %-20s\n", "Expected .lcr Name", results_file) + ...
+             sprintf("%-20s %-20d\n", "Target Framerate", frame_rate) + ...
              sprintf("End header\n\n");
     
     fprintf(f, header);
-    
+
+    model_augmentation = "Begin model augmentation\n";
+    model_augmentation = model_augmentation + sprintf("1 %-10f %-10f %-10f", [-2, 2, 0]);
+    model_augmentation = model_augmentation + "\nEnd model augmentation\n\n";
+
+    fprintf(f, model_augmentation);
+
     data = "Begin data\n";
     for i = 1:data_points
         data = data + sprintf("%-10f %-10f %-10f", sun_vectors(i, :)) + ...

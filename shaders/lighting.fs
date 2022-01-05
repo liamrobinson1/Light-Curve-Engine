@@ -77,7 +77,7 @@ void main()
         }
     }
 
-    vec4 irradiance = (fragColor*((colDiffuse + vec4(specular, 1.0))*vec4(lightDot, 1.0)));
+    vec4 irradiance = fragColor*(vec4(lightDot, 1.0));
 
     float irradUnit = irradiance.r * 255; //Finds the integer RGB (out of 255)
     float irradDecimal = 0.5 + (irradUnit - round(irradUnit)); //Finds what would be dropped otherwise
@@ -110,9 +110,9 @@ void main()
     float bias = 0.002 * tan(acos(cosTheta));
     bias = clamp(bias, 0.001, 0.04);
 
-    // if((textureDepth < d - bias) && (finalColor.r > 0)) {
-    //     finalColor = vec4(0.7, 0.0, 0.0, 1.0);
-    // }
+    if((textureDepth < d - bias) && (finalColor.r > 0)) {
+        finalColor = vec4(0.0, 0.0, 0.0, 1.0);
+    }
 
     // if(finalColor.r == 0) {
     //     finalColor = vec4(0.0, 0.5, 0.7, 1.0);

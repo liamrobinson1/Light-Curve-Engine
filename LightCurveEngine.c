@@ -26,31 +26,12 @@
 #include <stdlib.h>
 
 //User-defined
-#include "include/read_light_curve_commands.c"
+#include "include/lightcurvelib.c"
 
 #define RLIGHTS_IMPLEMENTATION
 #include "include/rlights.h"
 
-#define GLSL_VERSION            330
-#define MAX_INSTANCES          25 //no work: 2 5 6 10 11 (last 2 left) 12 17 (last 3 left) 18 (last 5 left) 19 (last 7 left) 20 (last 5 left)
-                                  //not rendered count: 2 5 6 10 9 12 14 13 12 20
-
-Image LoadImageFromScreenFixed(void);
-void printMatrix(Matrix m);
-Matrix CalculateMVPFromCamera(Camera light_camera, Vector3 offset);
-Matrix CalculateMVPBFromMVP(Matrix mvp_light);
-void SaveScreen(char fname[]);
-float CalculateCameraArea(Camera cam);
-float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int instances); //Finds the factor required to scale all vertices down to fit the model in a unit cube
-Mesh ApplyMeshScaleFactor(Mesh mesh, float sf);
-Vector3 TransformOffsetToCameraPlane(Camera cam, Vector3 offset);
-void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int instances);
-void CalculateRightAndTop(Camera cam, float *right, float *top);
-void InitializeViewerCamera(Camera *cam);
-void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *brightness_shader, Shader *light_curve_shader, Shader *min_shader, int depth_light_mvp_locs[], int lighting_light_mvp_locs[], int instances);
-void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances, bool gpu_light_curve_compute);
-void printVector3(Vector3 vec, const char name[]);
-void WriteLightCurveResults(char results_file[], float light_curve_results[], int data_points);
+#define MAX_INSTANCES          25
 
 int main(void)
 {
@@ -66,10 +47,12 @@ int main(void)
     char results_file[100];
     char model_name[100];
     bool use_gpu;
+    int frame_rate;
+    Vector3 model_augmentations[1000]; 
 
     bool rendering = true;
 
-    ReadLightCurveCommandFile(filename, model_name, &instances, &screenPixels, sun_vectors, viewer_vectors, &data_points, results_file, &use_gpu);
+    ReadLightCurveCommandFile(filename, model_name, &instances, &screenPixels, sun_vectors, viewer_vectors, &data_points, results_file, &use_gpu, &frame_rate, model_augmentations);
 
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     InitWindow(screenPixels, screenPixels, "Light Curve Engine"); // A cool name for a cool app
@@ -77,13 +60,23 @@ int main(void)
     int gridWidth = (int) ceil(sqrt(instances));
 
     Model model = LoadModel(TextFormat("models/%s", model_name));
+    Mesh mesh = model.meshes[0];
+
+    // for(int i = 0; i < mesh.vertexCount; i++) {
+    //   mesh.vertices[3*i+0] += model_augmentations[i].x;
+    //   mesh.vertices[3*i+1] += model_augmentations[i].y;
+    //   mesh.vertices[3*i+2] += model_augmentations[i].z;
+    // }
+
+    // for(int i = 0; i < mesh.triangleCount; i++) {
+    //   mesh.vertices[3*i+0] += model_augmentations[i].x;
+    //   mesh.vertices[3*i+1] += model_augmentations[i].y;
+    //   mesh.vertices[3*i+2] += model_augmentations[i].z;
+    // }
 
     Camera viewer_camera;                            // Define the viewer camera
     InitializeViewerCamera(&viewer_camera);
-
-    // Load plane model from a generated mesh
-    Mesh mesh = model.meshes[0];
-
+    
     float mesh_scale_factor = CalculateMeshScaleFactor(mesh, viewer_camera, instances);
     mesh = ApplyMeshScaleFactor(mesh, mesh_scale_factor);
 
@@ -113,7 +106,7 @@ int main(void)
     RenderTexture2D lightCurveTex = LoadRenderTexture(screenPixels, screenPixels); // Creates a RenderTexture2D for the light curve texture
     RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(instances)), screenPixels);              // Creates a RenderTexture2D (1x1) for the light curve texture
 
-    SetTargetFPS(600);                       // Attempt to run at 60 fps
+    SetTargetFPS(frame_rate);                       // Attempt to run at 60 fps
 
     float light_curve_results[1000];
     int frame_number = 0;
@@ -156,8 +149,6 @@ int main(void)
 
         viewer_camera_transforms[instance] = TransformOffsetToCameraPlane(viewer_camera, mesh_offsets[instance]);
         light_camera_transforms[instance] = TransformOffsetToCameraPlane(light_camera, mesh_offsets[instance]);
-
-        // printf("viewer_cam[%d]: %.6f, %.6f, %.6f\n", instance, 800 / viewer_camera_transforms[instance].x, 800 / viewer_camera_transforms[instance].y, 800 / viewer_camera_transforms[instance].z);
 
         float viewerCameraPos[3] = { viewer_camera.position.x, viewer_camera.position.y, viewer_camera.position.z };
         float lightPos[3] = { sun.position.x, sun.position.y, sun.position.z };
@@ -234,8 +225,7 @@ int main(void)
       float clipping_area = CalculateCameraArea(viewer_camera);
 
       float lightCurveFunction[MAX_INSTANCES];
-      printf("GPU use?: %s\n", use_gpu ? "true" : "false");
-      CalculateLightCurveValues(lightCurveFunction, minifiedLightCurveTex, brightnessTex, clipping_area, instances, use_gpu);
+      CalculateLightCurveValues(lightCurveFunction, minifiedLightCurveTex, brightnessTex, clipping_area, instances, mesh_scale_factor, use_gpu);
       
       //STORING LIGHT CURVE RESULTS
       for(int i = 0; i < instances; i++) {
@@ -257,7 +247,6 @@ int main(void)
 
         DrawFPS(10, 10);
 
-        DrawText(TextFormat("Clipping area = %.4f", clipping_area), 10, 40, 12, WHITE);
         // for(int i = 0; i < instances; i++) {
         // DrawText(TextFormat("Light Curve function estimate instance %d = %.4f (dev %.4f real)", i, lightCurveFunctionEst[i], (lightCurveFunctionEst[i] - lightCurveFunctionTrue[i])), 10, 60 + 20*i, 12, WHITE);
         // }
@@ -286,269 +275,4 @@ int main(void)
     CloseWindow();                      // Close window and OpenGL context
 
     return 0;
-}
-
-// Load image from screen buffer and (screenshot)
-Image LoadImageFromScreenFixed(void)
-{
-    Image image = { 0 };
-
-    image.width = GetScreenWidth() * 2; //Probably an artifact of the retina display... to do: coeck on other devices
-    image.height = GetScreenHeight() * 2;
-    image.mipmaps = 1;
-    image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
-    image.data = rlReadScreenPixels(image.width, image.height);
-
-    return image;
-}
-
-void printMatrix(Matrix m) 
-{
-    printf("\n[ %f %f %f %f\n %f %f %f %f\n %f %f %f %f\n %f %f %f %f ]\n", 
-    m.m0, m.m4, m.m8, m.m12, 
-    m.m1, m.m5, m.m9, m.m13,  
-    m.m2, m.m6, m.m10, m.m14,  
-    m.m3, m.m7, m.m11, m.m15);
-}
-
-Matrix CalculateMVPFromCamera(Camera cam, Vector3 offset) //Calculates the MVP matrix for a camera
-{
-        Matrix matView = MatrixLookAt(cam.position, cam.target, cam.up); //Calculate camera view matrix
-
-        float top;
-        float right;
-        CalculateRightAndTop(cam, &right, &top);
-        Matrix matProj = MatrixOrtho(-right, right, -top, top, 0.01, 1000.0); // Calculate camera projection matrix
-
-        return MatrixMultiply(MatrixMultiply(matView, MatrixTranslate(offset.x, offset.y, offset.z)), matProj); //Computes the light MVP matrix
-}
-
-Matrix CalculateMVPBFromMVP(Matrix MVP) //Calculates the biased MVP matrix for texture sampling
-{
-    Matrix bias_matrix = {0.5, 0.0, 0.0, 0.0,
-                          0.0, 0.5, 0.0, 0.0,
-                          0.0, 0.0, 0.5, 0.0,
-                          0.5, 0.5, 0.5, 1.0}; //Row-major form of the bias matrix (takes homogeneous coords [-1, 1] -> texture coords [0, 1])
-
-    return MatrixMultiply(MVP, MatrixTranspose(bias_matrix)); //Adds the bias for texture sampling
-}
-
-float CalculateCameraArea(Camera cam)
-{
-  float top;
-  float right;
-  CalculateRightAndTop(cam, &right, &top);
-  return 4.0*top*right;
-}
-
-void CalculateRightAndTop(Camera cam, float *right, float *top)
-{
-  float aspect = 1; //Screen aspect ratio
-  *top = (float) cam.fovy/2.0; //Half-height of the clipping plane
-  *right = *top*aspect; //Half-width of the clipping plane
-}
-
-void SaveScreen(char fname[]) //Saves the current screen image to a file
-{
-    Image screen_image = LoadImageFromScreenFixed();
-
-    // int success = ExportImage(screen_image, fname);
-    printf("Saved image!\n");
-}
-
-float CalculateMeshScaleFactor(Mesh mesh, Camera cam, int instances) //Finds the factor required to scale all vertices down to fit the model in a unit cube
-{
-  float largest_disp = 0.0;
-  for(int i = 0; i < mesh.vertexCount; i++) {
-    Vector3 vertex = {mesh.vertices[i*3+0], mesh.vertices[i*3+1], mesh.vertices[i*3+2]};
-    float vertex_disp = Vector3Length(vertex);
-
-    if(vertex_disp > largest_disp) largest_disp = vertex_disp;
-  }
-  int square_below = (int) ceil(sqrt(instances));  
-  float top;
-  float right;
-  CalculateRightAndTop(cam, &right, &top);
-
-  return (largest_disp / top) * square_below;
-}
-
-Mesh ApplyMeshScaleFactor(Mesh mesh, float sf)
-{  
-  for(int i = 0; i < mesh.vertexCount; i++) {
-    mesh.vertices[i*3] = mesh.vertices[i*3]/sf;
-    mesh.vertices[i*3+1] = mesh.vertices[i*3+1]/sf;
-    mesh.vertices[i*3+2] = mesh.vertices[i*3+2]/sf;
-  }
-  return mesh;
-}
-
-Vector3 TransformOffsetToCameraPlane(Camera cam, Vector3 offset)
-{
-  Vector3 basis1 = cam.up;
-  Vector3 normal = Vector3Scale(cam.position, 1.0 / Vector3Length(cam.position));
-  Vector3 basis2 = Vector3CrossProduct(basis1, normal);
-  Matrix camera_basis = MatrixTranspose((Matrix) {basis2.x, basis2.y, basis2.z, 0.0,
-                  basis1.x, basis1.y, basis1.z, 0.0,
-                  normal.x, normal.y, normal.z, 0.0,
-                  0.0, 0.0, 0.0, 1.0});
-
-  Vector3 transformed_offset = Vector3Transform(offset, camera_basis);
-  return transformed_offset;
-}
-
-void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int instances) 
-{
-  float top;
-  float right;
-  CalculateRightAndTop(cam, &right, &top);
-
-  int square_below = (int) ceil(sqrt(instances));
-
-  int index = 0;
-  for(int i = 0; i < square_below; i++) {
-    for(int j = 0; j < square_below; j++) {
-      Vector3 absolute_offset = {-right * (square_below - 1.0) + i * (square_below + (4.0 - square_below)), -top * (square_below - 1.0) + j * (square_below + (4.0 - square_below)), 0.0};
-
-      mesh_offsets[index] = Vector3Scale(absolute_offset, 1.0 / (float) square_below);
-      index++;
-      if(index == instances) break;
-    }
-  }
-}
-
-void InitializeViewerCamera(Camera *cam)
-{
-    cam->position = (Vector3){ 2.0f, 0.0f, -6.0f };   // Camera position
-    cam->target = (Vector3){ 0.0f, 0.0f, 0.0f };      // Camera looking at point
-    cam->up = (Vector3){ 0.0f, 1.0f, 0.0f };          // Camera up vector (rotation towards target)
-    cam->fovy = 4.0f;                                // Camera field-of-view Y
-    cam->projection = CAMERA_ORTHOGRAPHIC;             // Camera mode type
-}
-
-void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *brightness_shader, Shader *light_curve_shader, Shader *min_shader, int depth_light_mvp_locs[], int lighting_light_mvp_locs[], int instances) {
-    depthShader->locs[0] = GetShaderLocation(*depthShader, "viewPos");           //Location of the viewer position uniform for the depth shader
-    depthShader->locs[1] = GetShaderLocation(*depthShader, "light_mvp");         //Location of the light MVP matrix uniform for the depth shader
-    depthShader->locs[2] = GetShaderLocation(*depthShader, "lightPos");          //Location of the light position uniform for the depth shader
-    depthShader->locs[3] = GetShaderLocation(*depthShader, "model_id");          //Location of the model id uniform for the depth shader
-
-    for (int i = 0; i < instances; i++)
-    {
-      const char *matName = TextFormat("light_mvps[%d].mat\0", i);
-      depth_light_mvp_locs[i] = GetShaderLocation(*depthShader, matName);
-    }
-
-    lighting_shader->locs[0] = GetShaderLocation(*lighting_shader, "viewPos");   //Location of the viewer position uniform for the lighting shader
-    lighting_shader->locs[1] = GetShaderLocation(*lighting_shader, "lightPos");  //Location of the light position uniform for the lighting shader
-    lighting_shader->locs[2] = GetShaderLocation(*lighting_shader, "depthTex");  //Location of the depth texture uniform for the lighting shader
-    lighting_shader->locs[3] = GetShaderLocation(*lighting_shader, "mvp_from_script"); //Location of the light MVP matrix uniform for the lighting shader
-    lighting_shader->locs[4] = GetShaderLocation(*lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
-    lighting_shader->locs[5] = GetShaderLocation(*lighting_shader, "light_mvp");
-
-    min_shader->locs[0] = GetShaderLocation(*min_shader, "grid_width");
-
-    // for (int i = 0; i < instances; i++)
-    // {
-    //   const char *matName = TextFormat("light_mvps[%d].mat\0", i);
-    //   lighting_light_mvp_locs[i] = GetShaderLocation(*lighting_shader, matName);
-    // }
-}
-
-void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances, bool use_gpu) {
-    int gridWidth = (int) ceil(sqrt(instances));
-
-    Image light_curve_image = LoadImageFromTexture(minifiedLightCurveTex.texture);
-    Image full_light_curve_image = LoadImageFromTexture(minifiedLightCurveTex.texture);
-    int total_pixels = brightnessTex.texture.width * brightnessTex.texture.height;
-
-    float instance_total_irrad_est[MAX_INSTANCES];
-    float instance_total_irrad_true[MAX_INSTANCES];
-
-    int grid_pixel_height = light_curve_image.height / gridWidth;
-    
-    if(!use_gpu) {
-      full_light_curve_image = LoadImageFromTexture(brightnessTex.texture); 
-      //CALCULATING TRUE LC VALUES
-      int instance = 0;
-      for(int col_instance = 0; col_instance < gridWidth; col_instance++) {
-        for(int row_instance = 0; row_instance < gridWidth; row_instance++) {
-
-          float lit_rows = 0.0;
-          float sum_total_irrad_true = 0.0;
-
-          for(int row_instance_pixel = row_instance * grid_pixel_height; row_instance_pixel < (row_instance + 1) * grid_pixel_height; row_instance_pixel++) {
-            for(int col_instance_pixel = col_instance * grid_pixel_height; col_instance_pixel < (col_instance + 1) * grid_pixel_height; col_instance_pixel++) {
-              
-              Color pix_color = GetImageColor(full_light_curve_image, col_instance_pixel, row_instance_pixel);
-              
-              if((float) pix_color.g > 0.0) { //for all lit rows
-                lit_rows += 1.0;
-                sum_total_irrad_true += (float) pix_color.r / 255.0; //Represents the average irrad of each row * the fraction of lit pixels on that row
-              }
-            }
-          }
-          instance_total_irrad_true[instance++] = sum_total_irrad_true;
-        }
-      }
-    }
-    
-    // for(int i = 0; i < full_light_curve_image.width; i++) {
-    //   for(int j = 0; j < full_light_curve_image.height; j++) {
-    //     Color pix_color = GetImageColor(full_light_curve_image, i, j);
-
-    //     if((float) pix_color.g > 0.0) {
-    //       lit_pixels += 1.0;
-    //     }
-    //     sum_total_irrad += pix_color.r / 255.0;
-    //   }
-    // }
-    
-    //CALCULATING SHADED LC VALUES
-    for(int col = 0; col < light_curve_image.width; col++) {
-      for(int row_instance = 0; row_instance < gridWidth; row_instance++) {
-        float lit_rows = 0.0;
-        float sum_total_irrad_est = 0.0;
-        for(int row_instance_pixel = row_instance * grid_pixel_height; row_instance_pixel < (row_instance + 1) * grid_pixel_height; row_instance_pixel++) {
-          Color pix_color = GetImageColor(light_curve_image, col, row_instance_pixel);
-          
-          if((float) pix_color.g > 0.0) { //for all lit rows
-            lit_rows += 1.0;
-            sum_total_irrad_est += (float) pix_color.r / 255.0 * grid_pixel_height; //Represents the average irrad of each row * the fraction of lit pixels on that row
-          }
-        }
-        instance_total_irrad_est[row_instance + gridWidth * col] = sum_total_irrad_est;
-      }
-    }
-  
-    UnloadImage(light_curve_image);
-    UnloadImage(full_light_curve_image);
-
-    if(!use_gpu) {
-      for(int i = 0; i < instances; i++) {
-        lightCurveFunction[i] = instance_total_irrad_true[i] / total_pixels * clipping_area * gridWidth * gridWidth; //running_average.x = (for all lit pixels, average irrad)
-      }
-    }
-
-    if(use_gpu) {
-      for(int i = 0; i < instances; i++) {
-        lightCurveFunction[i] = instance_total_irrad_est[i] / total_pixels * clipping_area * gridWidth * gridWidth;
-      }
-    }
-}
-
-void printVector3(Vector3 vec, const char name[])
-{
-  printf("%s: %.4f, %.4f, %.4f\n", name, vec.x, vec.y, vec.z);
-}
-
-void WriteLightCurveResults(char results_file[], float light_curve_results[], int data_points)
-{
-  FILE *fptr;
-  fptr = fopen(results_file, "w");
-
-  for(int i = 0; i < data_points; i++) {    
-    fprintf(fptr, "%f\n", light_curve_results[i]);
-  }
-
-  fclose(fptr);
 }
