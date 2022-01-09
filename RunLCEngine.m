@@ -1,18 +1,18 @@
 CleanSlate
-rng default
 
-data_points = 1000;
+data_points = 100;
 
-model_file = "bs_smile.obj";
+reference_model_file = "box_wing_sat.obj";
+opt_model_file = "template_ico_sphere.obj";
 command_file = "light_curve.lcc";
 results_file = "light_curve.lcr";
-computation_method = "GPU";
 dimensions = 15*60; %dimensions should be a multiple of 60
 frame_rate = 1000;
+instances = 4;
 
 t = linspace(0, 2 * pi, data_points)';
 
-sun_vectors = [0*t + 0.5, 0*t + 2, 1 + 0*t];
+sun_vectors = [sin(t) + 0*t, 0 + 0*t, cos(t) + 0*t];
 viewer_vectors = [sin(t) + 0*t, 0 + 0*t, cos(t) + 0*t];
 
 viewer_vectors = viewer_vectors ./ vecnorm(viewer_vectors, 2, 2) * 2;
@@ -21,21 +21,32 @@ sun_vectors = sun_vectors ./ vecnorm(sun_vectors, 2, 2) * 2;
 figure
 hold on
 
-for instances = [1]
-    writeLCRFile(command_file, results_file, model_file, instances, dimensions, data_points, computation_method, ...
+%%%%% GENERATING REFERENCE LIGHT CURVE
+ref_light_curve = runLightCurveEngine(command_file, results_file, reference_model_file, instances, dimensions, data_points, ...
+    sun_vectors, viewer_vectors, frame_rate);
+
+plot(1:data_points, ref_light_curve, 'linewidth', 2);
+drawnow
+
+texit("Light Curve", "Data point index", "Light curve function $$L(\vec{o}, \vec{L})$$")
+
+
+function light_curve = runLightCurveEngine(command_file, results_file, model_file, instances, dimensions, data_points, ...
+    sun_vectors, viewer_vectors, frame_rate)
+
+    writeLCRFile(command_file, results_file, model_file, instances, dimensions, data_points, ...
     sun_vectors, viewer_vectors, frame_rate)
     
     tic;
     [~, ~] = system("./LightCurveEngine");
     toc;
 
-    light_curve_data = importdata(results_file);
-
-    plot(1:data_points, light_curve_data, 'linewidth', 2);
-    drawnow;
+    light_curve = importdata(results_file);
 end
 
-texit("Light Curve", "Data point index", "Light curve function $$L(\vec{o}, \vec{L})$$")
+function vertex_aug = randVertexAugment(data_points)
+    vertex_aug = reshape((rand(1, 3, data_points) - 0.5) * 2, data_points, 3);
+end
 
 function unit_vectors = randUnitVectors(data_points)
     unit_vectors = reshape((rand(3, 1, data_points) - 0.5) * 2, data_points, 3);
@@ -43,7 +54,7 @@ function unit_vectors = randUnitVectors(data_points)
 end
 
 function writeLCRFile(command_file, results_file, model_file, instances, dimensions, ...
-    data_points, computation_method, sun_vectors, viewer_vectors, frame_rate)
+    data_points, sun_vectors, viewer_vectors, frame_rate)
     f = fopen(command_file,'w');
     
     header = "Light Curve Command File\n" + ...
@@ -54,7 +65,6 @@ function writeLCRFile(command_file, results_file, model_file, instances, dimensi
              sprintf("%-20s %-20s\n", "Format", "SunXYZViewerXYZ") + ...
              sprintf("%-20s %-20s\n", "Reference Frame", "ObjectBody") + ...
              sprintf("%-20s %-20d\n", "Data Points", data_points) + ...
-             sprintf("%-20s %-20s\n", "Computation Method", computation_method) + ...
              sprintf("%-20s %-20s\n", "Expected .lcr Name", results_file) + ...
              sprintf("%-20s %-20d\n", "Target Framerate", frame_rate) + ...
              sprintf("End header\n\n");

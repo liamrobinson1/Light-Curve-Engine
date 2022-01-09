@@ -32,6 +32,8 @@
 #include "include/rlights.h"
 
 #define MAX_INSTANCES          25
+#define MAX_DATA_POINTS        1000
+#define MAX_FNAME_LENGTH       100
 
 int main(void)
 {
@@ -39,20 +41,19 @@ int main(void)
     // Initialization
     //--------------------------------------------------------------------------------------
     int screenPixels;
-    char filename[] = "light_curve.lcc"; 
+    char command_filename[] = "light_curve.lcc"; 
     int instances; 
-    Vector3 sun_vectors[1000];
-    Vector3 viewer_vectors[1000]; 
+    Vector3 sun_vectors[MAX_DATA_POINTS];
+    Vector3 viewer_vectors[MAX_DATA_POINTS]; 
     int data_points;
-    char results_file[100];
-    char model_name[100];
-    bool use_gpu;
+    char results_file[MAX_FNAME_LENGTH];
+    char model_name[MAX_FNAME_LENGTH];
     int frame_rate;
-    Vector3 model_augmentations[1000]; 
 
     bool rendering = true;
 
-    ReadLightCurveCommandFile(filename, model_name, &instances, &screenPixels, sun_vectors, viewer_vectors, &data_points, results_file, &use_gpu, &frame_rate, model_augmentations);
+    ReadLightCurveCommandFile(command_filename, model_name, &instances, &screenPixels, sun_vectors, viewer_vectors, &data_points, results_file, &frame_rate);
+    ClearLightCurveResults(results_file);
 
     SetConfigFlags(FLAG_MSAA_4X_HINT);  // Enable Multi Sampling Anti Aliasing 4x (if available)
     InitWindow(screenPixels, screenPixels, "Light Curve Engine"); // A cool name for a cool app
@@ -61,18 +62,6 @@ int main(void)
 
     Model model = LoadModel(TextFormat("models/%s", model_name));
     Mesh mesh = model.meshes[0];
-
-    // for(int i = 0; i < mesh.vertexCount; i++) {
-    //   mesh.vertices[3*i+0] += model_augmentations[i].x;
-    //   mesh.vertices[3*i+1] += model_augmentations[i].y;
-    //   mesh.vertices[3*i+2] += model_augmentations[i].z;
-    // }
-
-    // for(int i = 0; i < mesh.triangleCount; i++) {
-    //   mesh.vertices[3*i+0] += model_augmentations[i].x;
-    //   mesh.vertices[3*i+1] += model_augmentations[i].y;
-    //   mesh.vertices[3*i+2] += model_augmentations[i].z;
-    // }
 
     Camera viewer_camera;                            // Define the viewer camera
     InitializeViewerCamera(&viewer_camera);
@@ -108,7 +97,7 @@ int main(void)
 
     SetTargetFPS(frame_rate);                       // Attempt to run at 60 fps
 
-    float light_curve_results[1000];
+    float light_curve_results[MAX_DATA_POINTS];
     int frame_number = 0;
     // Main animation loop
     while (!WindowShouldClose() && rendering)            // Detect window close button or ESC key
@@ -225,7 +214,7 @@ int main(void)
       float clipping_area = CalculateCameraArea(viewer_camera);
 
       float lightCurveFunction[MAX_INSTANCES];
-      CalculateLightCurveValues(lightCurveFunction, minifiedLightCurveTex, brightnessTex, clipping_area, instances, mesh_scale_factor, use_gpu);
+      CalculateLightCurveValues(lightCurveFunction, minifiedLightCurveTex, brightnessTex, clipping_area, instances, mesh_scale_factor);
       
       //STORING LIGHT CURVE RESULTS
       for(int i = 0; i < instances; i++) {
@@ -247,9 +236,6 @@ int main(void)
 
         DrawFPS(10, 10);
 
-        // for(int i = 0; i < instances; i++) {
-        // DrawText(TextFormat("Light Curve function estimate instance %d = %.4f (dev %.4f real)", i, lightCurveFunctionEst[i], (lightCurveFunctionEst[i] - lightCurveFunctionTrue[i])), 10, 60 + 20*i, 12, WHITE);
-        // }
       EndDrawing();
 
       frame_number++;

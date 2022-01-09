@@ -12,7 +12,7 @@
 #define MAX_INSTANCES          25
 
 void ReadLightCurveCommandFile(char *filename, char *model_name, int *instances, int *screen_pixels, 
-     Vector3 sun_vectors[], Vector3 viewer_vectors[], int *data_points, char *results_file, bool *use_gpu, int *frame_rate, Vector3 model_augmentations[]);
+     Vector3 sun_vectors[], Vector3 viewer_vectors[], int *data_points, char *results_file, int *frame_rate);
 Image LoadImageFromScreenFixed(void);
 void printMatrix(Matrix m);
 Matrix CalculateMVPFromCamera(Camera light_camera, Vector3 offset);
@@ -26,12 +26,13 @@ void GenerateTranslations(Vector3 *mesh_offsets, Camera cam, int instances);
 void CalculateRightAndTop(Camera cam, float *right, float *top);
 void InitializeViewerCamera(Camera *cam);
 void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *brightness_shader, Shader *light_curve_shader, Shader *min_shader, int depth_light_mvp_locs[], int lighting_light_mvp_locs[], int instances);
-void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances, float scale_factor, bool gpu_light_curve_compute);
+void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances, float scale_factor);
 void printVector3(Vector3 vec, const char name[]);
 void WriteLightCurveResults(char results_file[], float light_curve_results[], int data_points);
+void ClearLightCurveResults(char results_file[]);
 
 void ReadLightCurveCommandFile(char *filename, char *model_name, int *instances, int *screen_pixels, 
-      Vector3 sun_vectors[], Vector3 viewer_vectors[], int *data_points, char *results_file, bool *use_gpu, int *frame_rate, Vector3 model_augmentations[])
+      Vector3 sun_vectors[], Vector3 viewer_vectors[], int *data_points, char *results_file, int *frame_rate)
 {
 
   char *file_contents = LoadFileText(filename);
@@ -44,11 +45,9 @@ void ReadLightCurveCommandFile(char *filename, char *model_name, int *instances,
   int format_index = TextFindIndex(file_contents, "Format "); // Find first text occurrence within a string
   int reference_frame_index = TextFindIndex(file_contents, "Reference Frame"); // Find first text occurrence within a string
   int data_points_index = TextFindIndex(file_contents, "Data Points"); // Find first text occurrence within a string
-  int computation_method_index = TextFindIndex(file_contents, "Computation Method"); // Find first text occurrence within a string
   int results_file_index = TextFindIndex(file_contents, "Expected .lcr Name"); // Find first text occurrence within a string
   int frame_rate_index = TextFindIndex(file_contents, "Target Framerate"); // Find first text occurrence within a string
   
-  int begin_model_aug_index = TextFindIndex(file_contents, "Begin model augmentation"); // Find first text occurrence within a string
   int begin_data_index = TextFindIndex(file_contents, "Begin data"); // Find first text occurrence within a string
 
   char delim[] = "\n";
@@ -59,7 +58,6 @@ void ReadLightCurveCommandFile(char *filename, char *model_name, int *instances,
   char *format = TextReplace(strtok(file_contents + format_index + HEADER_OFFSET, delim), " ", "");
   char *reference_frame = TextReplace(strtok(file_contents + reference_frame_index + HEADER_OFFSET, delim), " ", "");
   *data_points = atoi(strtok(file_contents + data_points_index + HEADER_OFFSET, delim));
-  char *computation_method = TextReplace(strtok(file_contents + computation_method_index + HEADER_OFFSET, delim), " ", "");
   char *results_file_temp = TextReplace(strtok(file_contents + results_file_index + HEADER_OFFSET, delim), " ", "");
   *frame_rate = atoi(strtok(file_contents + frame_rate_index + HEADER_OFFSET, delim));
 
@@ -71,27 +69,11 @@ void ReadLightCurveCommandFile(char *filename, char *model_name, int *instances,
     model_name[i] = model_file_name[i];
   }
 
-  if(TextIsEqual(computation_method, "GPU")) *use_gpu = true;
-  if(TextIsEqual(computation_method, "CPU")) *use_gpu = false;
-
   printf("%s\n", model_file_name);
   printf("%d\n", *instances);
   printf("%s\n", format);
   printf("%s\n", reference_frame);
   printf("%s\n", results_file);
-
-  //Model augmentation parsing
-  char *model_aug_data = strtok(file_contents + begin_model_aug_index + 24, delim);
-  model_aug_data = TextReplace(model_aug_data, "   ", ",");
-  model_aug_data = TextReplace(model_aug_data, "  ", ",");
-  model_aug_data = TextReplace(model_aug_data, " ", ",");
-
-  int vertex_index = atoi(strtok(model_aug_data, ","));
-  double dx = atof(strtok(NULL, ","));
-  double dy = atof(strtok(NULL, ","));
-  double dz = atof(strtok(NULL, ","));
-
-  model_augmentations[vertex_index] = (Vector3) {dx, dy, dz};
 
   //Sun/viewer data parsing
   for(int line_num = 0; line_num < *data_points; line_num++) {
@@ -291,52 +273,22 @@ void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *
     // }
 }
 
-void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances, float scale_factor, bool use_gpu) {
+void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minifiedLightCurveTex, RenderTexture2D brightnessTex, float clipping_area, int instances, float scale_factor) {
     int gridWidth = (int) ceil(sqrt(instances));
 
     Image light_curve_image = LoadImageFromTexture(minifiedLightCurveTex.texture);
-    Image full_light_curve_image = LoadImageFromTexture(minifiedLightCurveTex.texture);
     int total_pixels = brightnessTex.texture.width * brightnessTex.texture.height;
 
     float instance_total_irrad_est[MAX_INSTANCES];
-    float instance_total_area_est[MAX_INSTANCES];
-
-    float instance_total_irrad_true[MAX_INSTANCES];
 
     int grid_pixel_height = light_curve_image.height / gridWidth;
-    
-    if(!use_gpu) {
-      full_light_curve_image = LoadImageFromTexture(brightnessTex.texture); 
-      //CALCULATING TRUE LC VALUES
-      int instance = 0;
-      for(int col_instance = 0; col_instance < gridWidth; col_instance++) {
-        for(int row_instance = 0; row_instance < gridWidth; row_instance++) {
-
-          float lit_rows = 0.0;
-          float sum_total_irrad_true = 0.0;
-
-          for(int row_instance_pixel = row_instance * grid_pixel_height; row_instance_pixel < (row_instance + 1) * grid_pixel_height; row_instance_pixel++) {
-            for(int col_instance_pixel = col_instance * grid_pixel_height; col_instance_pixel < (col_instance + 1) * grid_pixel_height; col_instance_pixel++) {
-              
-              Color pix_color = GetImageColor(full_light_curve_image, col_instance_pixel, row_instance_pixel);
-              
-              if((float) pix_color.g > 0.0) { //for all lit rows
-                lit_rows += 1.0;
-                sum_total_irrad_true += (float) pix_color.r / 255.0; //Represents the average irrad of each row * the fraction of lit pixels on that row
-              }
-            }
-          }
-          instance_total_irrad_true[instance++] = sum_total_irrad_true;
-        }
-      }
-    }
     
     //CALCULATING SHADED LC VALUES
     for(int col = 0; col < light_curve_image.width; col++) {
       for(int row_instance = 0; row_instance < gridWidth; row_instance++) {
         float lit_pixels = 0.0;
         float lighting_factor = 0.0;
-        float light_curve_function = 0.0;
+
         for(int row_instance_pixel = row_instance * grid_pixel_height; row_instance_pixel < (row_instance + 1) * grid_pixel_height; row_instance_pixel++) {
           Color pix_color = GetImageColor(light_curve_image, col, row_instance_pixel);
           
@@ -349,29 +301,15 @@ void CalculateLightCurveValues(float lightCurveFunction[], RenderTexture2D minif
         float instance_clipping_area = 1.0 / (float) (gridWidth * gridWidth) * clipping_area;
         float apparent_model_lit_area_scaled = instance_clipping_area * fraction_of_pixels_lit;
         float apparent_model_lit_area_unscaled = apparent_model_lit_area_scaled * scale_factor * scale_factor;//removing the mesh scale factor
-
-        instance_total_irrad_est[row_instance + gridWidth * col] = lighting_factor;
-        // instance_total_area_est[row_instance + gridWidth * col] = average_irrad * model_lit_area_unscaled / PI; // I think this is right
         
-        instance_total_area_est[row_instance + gridWidth * col] = lighting_factor * apparent_model_lit_area_unscaled / PI;
+        instance_total_irrad_est[row_instance + gridWidth * col] = lighting_factor * apparent_model_lit_area_unscaled / PI;
       }
     }
   
     UnloadImage(light_curve_image);
-    UnloadImage(full_light_curve_image);
 
-    if(!use_gpu) {
-      for(int i = 0; i < instances; i++) {
-        lightCurveFunction[i] = instance_total_irrad_true[i] / total_pixels * clipping_area * gridWidth * gridWidth; //running_average.x = (for all lit pixels, average irrad)
-      }
-    }
-
-    if(use_gpu) {
-      for(int i = 0; i < instances; i++) {
-        float screen_irrad_percent_filled = instance_total_irrad_est[i]; // amount of irrad seen / total irrad possible
-        lightCurveFunction[i] = screen_irrad_percent_filled / PI;
-        lightCurveFunction[i] = instance_total_area_est[i];
-      }
+    for(int i = 0; i < instances; i++) {
+      lightCurveFunction[i] = instance_total_irrad_est[i];
     }
 }
 
@@ -390,4 +328,9 @@ void WriteLightCurveResults(char results_file[], float light_curve_results[], in
   }
 
   fclose(fptr);
+}
+
+void ClearLightCurveResults(char results_file[])
+{
+  remove(results_file);
 }
