@@ -26,7 +26,7 @@ void main()
     float y0 = lightPosition.y;
     float z0 = lightPosition.z;
 
-    float d = -dot(vec3(x1-x0, y1-y0, z1-z0), vec3(A, B, C))/40.0;
+    float d = -dot(vec3(x1-x0, y1-y0, z1-z0), vec3(A, B, C))/10.0;
 
     fragColor = vec4(d, d, d, 1.0);
 }

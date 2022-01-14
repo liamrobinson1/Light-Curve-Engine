@@ -1,20 +1,11 @@
 // clang -framework CoreVideo -framework IOKit -framework Cocoa -framework GLUT -framework OpenGL lib/libraylib.a LightCurveEngine.c -o LightCurveEngine
 /*******************************************************************************************
 *
-*   raylib [shaders] example - basic lighting
-*
-*   NOTE: This example requires raylib OpenGL 3.3 or ES2 versions for shaders support,
-*         OpenGL 1.1 does not support shaders, recompile raylib to OpenGL 3.3 version.
-*
-*   NOTE: Shaders used in this example are #version 330 (OpenGL 3.3).
-*
-*   This example has been created using raylib 3.8 (www.raylib.com)
-*   raylib is licensed under an unmodified zlib/libpng license (View raylib.h for details)
-*
-*   Example contributed by Chris Camacho (@codifies, http://bedroomcoders.co.uk/) and 
-*   reviewed by Ramon Santamaria (@raysan5)
-*
-*   Copyright (c) 2019-2021 Chris Camacho (@codifies) and Ramon Santamaria (@raysan5)
+*   Light Curve Engine
+*   Author: Liam Robinson
+*   NOTE: This code is meant to interact with a light_curve.lcc (light curve command) file
+*   written by MATLAB. All additional functionality should be implemented through the MATLAB
+*   inteface for future flexibility.
 *
 ********************************************************************************************/
 
@@ -93,7 +84,7 @@ int main(void)
     RenderTexture2D renderedTex = LoadRenderTexture(screenPixels, screenPixels);   // Creates a RenderTexture2D for the rendered texture
     RenderTexture2D brightnessTex = LoadRenderTexture(screenPixels, screenPixels); // Creates a RenderTexture2D for the brightness texture
     RenderTexture2D lightCurveTex = LoadRenderTexture(screenPixels, screenPixels); // Creates a RenderTexture2D for the light curve texture
-    RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(instances)), screenPixels);              // Creates a RenderTexture2D (1x1) for the light curve texture
+    RenderTexture2D minifiedLightCurveTex = LoadRenderTexture(ceil(sqrt(instances)), screenPixels); // Creates a RenderTexture2D minified (height x instances) for the light curve texture
 
     SetTargetFPS(frame_rate);                       // Attempt to run at 60 fps
 
@@ -117,8 +108,7 @@ int main(void)
       rlUpdateVertexBuffer(mesh.vboId[2], mesh.normals, mesh.vertexCount*3*sizeof(float), 0);     // Update vertex normals
       
       for(int instance = 0; instance < instances; instance++) {
-        int render_index = instance + (frame_number * instances) % data_points;
-        // int render_index = 19;
+        int render_index = instance + (frame_number * instances) % data_points; // Selects the correct entry of the command file for this instance
 
         sun.position = sun_vectors[render_index];
         viewer_camera.position = viewer_vectors[render_index];
@@ -230,9 +220,9 @@ int main(void)
       //DRAWING
       BeginDrawing();
         ClearBackground(BLACK);
-        DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        // DrawTextureRec(depthTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
         DrawTextureRec(renderedTex.texture, (Rectangle){ 0, 0, depthTex.texture.width, (float) -depthTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
-        DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
+        // DrawTextureRec(minifiedLightCurveTex.texture, (Rectangle){ 0, 0, minifiedLightCurveTex.texture.width, (float) -minifiedLightCurveTex.texture.height }, (Vector2){ 0, 0 }, WHITE);
 
         DrawFPS(10, 10);
 

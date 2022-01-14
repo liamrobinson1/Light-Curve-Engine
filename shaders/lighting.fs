@@ -102,7 +102,7 @@ void main()
     float y0 = lightPosition.y;
     float z0 = lightPosition.z;
 
-    float d = -dot(vec3(x1-x0, y1-y0, z1-z0), vec3(A, B, C))/40.0;
+    float d = -dot(vec3(x1-x0, y1-y0, z1-z0), vec3(A, B, C))/10.0;
 
     float cosTheta = dot(normalize(lightPosition), normalize(fragNormal));
 
@@ -111,6 +111,7 @@ void main()
     bias = clamp(bias, 0.001, 0.04);
 
     if((textureDepth < d - bias) && (finalColor.r > 0)) {
+        // finalColor = vec4(0.651, 0.1176, 0.1176, 1.0);
         finalColor = vec4(0.0, 0.0, 0.0, 1.0);
     }
 

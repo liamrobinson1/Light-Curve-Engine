@@ -1,35 +1,37 @@
 CleanSlate
 
-data_points = 100;
+data_points = 1000;
 
-reference_model_file = "box_wing_sat.obj";
-opt_model_file = "template_ico_sphere.obj";
+reference_model_file = "box_wing_sat_tri.obj";
 command_file = "light_curve.lcc";
 results_file = "light_curve.lcr";
 dimensions = 15*60; %dimensions should be a multiple of 60
-frame_rate = 1000;
-instances = 4;
+frame_rate = 1;
+instances = 16;
 
 t = linspace(0, 2 * pi, data_points)';
 
-sun_vectors = [sin(t) + 0*t, 0 + 0*t, cos(t) + 0*t];
-viewer_vectors = [sin(t) + 0*t, 0 + 0*t, cos(t) + 0*t];
+sun_vectors = [cos(t) + 0*t, 0.5 + 0*t, 0*t + sin(t)];
+viewer_vectors = [5 + 0*t, 2 + 0*t, 5  + 0*t];
 
 viewer_vectors = viewer_vectors ./ vecnorm(viewer_vectors, 2, 2) * 2;
 sun_vectors = sun_vectors ./ vecnorm(sun_vectors, 2, 2) * 2;
 
-figure
-hold on
-
-%%%%% GENERATING REFERENCE LIGHT CURVE
+% %%%%% GENERATING REFERENCE LIGHT CURVE
 ref_light_curve = runLightCurveEngine(command_file, results_file, reference_model_file, instances, dimensions, data_points, ...
     sun_vectors, viewer_vectors, frame_rate);
 
-plot(1:data_points, ref_light_curve, 'linewidth', 2);
-drawnow
+figure
+hold on
 
-texit("Light Curve", "Data point index", "Light curve function $$L(\vec{o}, \vec{L})$$")
+legendarr = [];
 
+scatter(1:data_points, ref_light_curve, '.');
+
+% load('/Users/liam/OneDrive - purdue.edu/Frueh Research/Concave Object Light Curve/Concave-Object-Reconstruction-from-Light-Curve/ray_lc')
+% scatter(linspace(0, data_points, length(L_obj)), L_obj, 100, '.')
+texit("Light Curve - Liam Robinson", "Data point index", "Light Curve Function", ...
+    legendarr, 'southwest')
 
 function light_curve = runLightCurveEngine(command_file, results_file, model_file, instances, dimensions, data_points, ...
     sun_vectors, viewer_vectors, frame_rate)
