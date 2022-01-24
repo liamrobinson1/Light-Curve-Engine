@@ -172,7 +172,8 @@ int main(void)
                 SetShaderValueMatrix(lighting_shader, lighting_shader.locs[5], mvp_light_biases[instance]);
                 SetShaderValueMatrix(lighting_shader, lighting_shader.locs[3], mvp_viewer[instance]);
                 SetShaderValueTexture(lighting_shader, lighting_shader.locs[2], depthTex.texture); //Sends depth texture to the main lighting shader 
-                
+                SetShaderValue(lighting_shader, lighting_shader.locs[6], &gridWidth, SHADER_UNIFORM_INT); //Sends depth texture to the main lighting shader 
+
                 DrawMesh(mesh, model.materials[0], MatrixTranslate(viewer_camera_transforms[instance].x, viewer_camera_transforms[instance].y, viewer_camera_transforms[instance].z));     
           EndMode3D();
 

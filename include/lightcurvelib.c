@@ -263,7 +263,8 @@ void GetLCShaderLocations(Shader *depthShader, Shader *lighting_shader, Shader *
     lighting_shader->locs[3] = GetShaderLocation(*lighting_shader, "mvp_from_script"); //Location of the light MVP matrix uniform for the lighting shader
     lighting_shader->locs[4] = GetShaderLocation(*lighting_shader, "model_id");  //Location of the light MVP matrix uniform for the lighting shader
     lighting_shader->locs[5] = GetShaderLocation(*lighting_shader, "light_mvp");
-
+    lighting_shader->locs[6] = GetShaderLocation(*lighting_shader, "grid_width");
+    
     min_shader->locs[0] = GetShaderLocation(*min_shader, "grid_width");
 
     // for (int i = 0; i < instances; i++)

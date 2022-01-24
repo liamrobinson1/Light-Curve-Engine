@@ -39,6 +39,7 @@ struct Light {
 uniform Light lights[MAX_LIGHTS];
 uniform vec3 viewPos;
 uniform sampler2D depthTex;
+uniform int grid_width;
 
 void main()
 {
@@ -85,8 +86,7 @@ void main()
     finalColor = vec4(irradUnit / 255.0, irradUnit / 255.0, irradUnit / 255.0, 1.0);
 
     //SHADOWING
-    vec3 normalOffset = normalize(fragNormal) * 0.04;
-    // vec3 normalOffset = vec3(0.0, 0.0, 0.0);
+    vec3 normalOffset = normalize(fragNormal) * 0.06; //was 0.04
 
     float textureDepth = texture(depthTex, ShadowCoord.xy).x; // depth from the depth texture
     //point to plane distance computation (from frag position to the oblique plane of the light)
@@ -110,7 +110,7 @@ void main()
     float bias = 0.002 * tan(acos(cosTheta));
     bias = clamp(bias, 0.001, 0.04);
 
-    if((textureDepth < d - bias) && (finalColor.r > 0)) {
+    if((textureDepth < d - bias / grid_width) && (finalColor.r > 0)) {
         // finalColor = vec4(0.651, 0.1176, 0.1176, 1.0);
         finalColor = vec4(0.0, 0.0, 0.0, 1.0);
     }
